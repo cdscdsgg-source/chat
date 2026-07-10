@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>반응 문구 추천기</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="eyebrow"><span class="tally"></span>Link Analyzer</div>
+      <div class="title-row">
+        <h1>반응 문구 추천기</h1>
+        <span class="badge">1회성 페이지 분석</span>
+      </div>
+      <p class="subtitle">상품/방송 페이지 링크를 넣으면 제목·설명을 읽어와서, 내용에 맞는 반응 문구를 추천해드려요. 채팅창엔 직접 입력해주세요 — 자동 게시는 하지 않습니다.</p>
+    </header>
+
+    <section class="input-row">
+      <input id="url-input" type="url" inputmode="url" placeholder="https://... 상품/방송 페이지 링크를 붙여넣으세요" autocomplete="off" />
+      <button id="analyze-btn" type="button">분석하기</button>
+    </section>
+
+    <p class="status" id="status" aria-live="polite"></p>
+
+    <section class="result" id="result" hidden>
+      <div class="page-card">
+        <div class="page-title" id="page-title"></div>
+        <div class="page-desc" id="page-desc"></div>
+        <div class="chips" id="chips"></div>
+      </div>
+    </section>
+
+    <div class="watch-card">
+      <div class="watch-head">
+        <div>
+          <div class="watch-title">실시간 채팅 감시</div>
+          <div class="watch-sub">네이버 쇼핑라이브 링크일 때만 지원돼요 · 채팅을 읽기만 하고 아무것도 올리지 않아요</div>
+        </div>
+        <button id="watch-btn" type="button">감시 시작</button>
+      </div>
+      <div class="watch-body" id="watch-body" hidden>
+        <div class="watch-stats">
+          <span class="mono" id="watch-rate">0.0 msg/s</span>
+          <span class="watch-viewers mono" id="watch-viewers"></span>
+        </div>
+        <canvas id="watch-canvas"></canvas>
+        <div class="watch-ticker" id="watch-ticker"></div>
+      </div>
+    </div>
+
+    <div class="feed">
+      <div class="feed-head">
+        <h2>추천 문구</h2>
+        <div class="feed-sub">클릭하면 문구가 복사돼요 · 채팅창엔 직접 입력해주세요</div>
+      </div>
+      <div class="feed-list" id="feed-list"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
