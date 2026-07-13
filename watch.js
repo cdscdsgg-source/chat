@@ -20,11 +20,8 @@ const UA =
 
 const POLL_MS = 4000;
 const WINDOW_MS = 150000; // keep 2.5 minutes of history
-const RATE_WINDOW_MS = 15000; // instantaneous rate window
-const BASELINE_WINDOW_MS = 90000; // baseline comparison window
-const KEYWORD_WINDOW_MS = 30000;
-const KEYWORD_BURST_MIN = 2;
-const CUE_COOLDOWN_MS = 10000;
+const RATE_WINDOW_MS = 15000; // instantaneous rate window, for the display graph only
+const CUE_EVERY_N_MESSAGES = 3;
 
 let state = null; // single active watch at a time
 
@@ -83,29 +80,20 @@ function pickCueGroup(recentHits) {
       bestCount = count;
     }
   }
-  return best && bestCount >= KEYWORD_BURST_MIN ? best : null;
+  return best;
 }
 
-function maybeEmitCue(now, velocitySpike) {
-  if (now - state.lastCueAt < CUE_COOLDOWN_MS) return;
-
-  const recent = state.messages.filter((m) => now - m.ts <= KEYWORD_WINDOW_MS);
-  const group = pickCueGroup(recent.map((m) => m.hits));
-
-  let templateKey = group;
-  if (!templateKey && velocitySpike) templateKey = "velocity";
-  if (!templateKey) return;
-
+function emitCueForBatch(batch) {
+  const group = pickCueGroup(batch.map((m) => m.hits));
+  const templateKey = group || "velocity";
   const templates = PHRASE_TEMPLATES[templateKey] || PHRASE_TEMPLATES.velocity;
-  const phrases = templates(state.shortTitle);
-  const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+  const phrase = templates(state.shortTitle)[Math.floor(Math.random() * templates(state.shortTitle).length)];
 
-  state.lastCueAt = now;
   broadcastEvent({
     type: "cue",
     phrase,
-    reason: group ? KEYWORD_GROUPS[group].label : "채팅 속도 급증",
-    time: new Date(now).toLocaleTimeString("ko-KR", { hour12: false }),
+    reason: group ? KEYWORD_GROUPS[group].label : "채팅 3건 누적",
+    time: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
   });
 }
 
@@ -115,15 +103,9 @@ function evaluateSignals() {
   state.messages = state.messages.filter((m) => now - m.ts <= WINDOW_MS);
 
   const rateCount = state.messages.filter((m) => now - m.ts <= RATE_WINDOW_MS).length;
-  const baselineCount = state.messages.filter((m) => now - m.ts <= BASELINE_WINDOW_MS).length;
-  const baselinePerWindow = Math.max(0.6, (baselineCount / BASELINE_WINDOW_MS) * RATE_WINDOW_MS);
   const msgPerSec = rateCount / (RATE_WINDOW_MS / 1000);
 
-  const velocitySpike = rateCount >= 3 && rateCount > baselinePerWindow * 2;
-
   broadcastEvent({ type: "tick", msgPerSec: Number(msgPerSec.toFixed(1)), viewerCount: state.viewerCount });
-
-  maybeEmitCue(now, velocitySpike);
 }
 
 async function pollComments() {
@@ -140,12 +122,19 @@ async function pollComments() {
       if (item.commentType !== "CHATTING" || !item.message) continue;
       const hits = classifyMessage(item.message);
       const ts = Date.parse(item.commentCreatedAt) || Date.now();
-      state.messages.push({ ts, nickname: item.nickname, message: item.message, hits });
+      const entry = { ts, nickname: item.nickname, message: item.message, hits };
+      state.messages.push(entry);
+      state.pendingBatch.push(entry);
       broadcastEvent({ type: "chat", nickname: item.nickname, message: item.message });
     }
     if (data.next != null) state.nextCursor = data.next;
   } catch {
     // transient network hiccup; try again next poll
+  }
+
+  while (state.pendingBatch.length >= CUE_EVERY_N_MESSAGES) {
+    const batch = state.pendingBatch.splice(0, CUE_EVERY_N_MESSAGES);
+    emitCueForBatch(batch);
   }
 
   evaluateSignals();
@@ -186,7 +175,7 @@ async function startWatch(targetUrl) {
     viewerCount: null,
     nextCursor: 0,
     messages: [],
-    lastCueAt: 0,
+    pendingBatch: [],
     clients: new Set(),
     timer: null,
     viewerTimer: null,
