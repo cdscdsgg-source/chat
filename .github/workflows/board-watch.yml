@@ -22,15 +22,18 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Check board for new posts
+      - name: Check todaysppc board for new posts
         run: python board-watcher/watch.py
+
+      - name: Check MOHW boards for new posts
+        run: python board-watcher/mohw_watch.py
 
       - name: Commit updated state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- board-watcher/state.txt; then
-            git add board-watcher/state.txt
+          if ! git diff --quiet -- board-watcher/state.txt board-watcher/mohw_press_release_state.txt board-watcher/mohw_press_explain_state.txt; then
+            git add board-watcher/state.txt board-watcher/mohw_press_release_state.txt board-watcher/mohw_press_explain_state.txt
             git commit -m "chore: update board-watcher state"
             git push
           fi
