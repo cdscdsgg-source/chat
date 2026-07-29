@@ -35,5 +35,13 @@ jobs:
           if ! git diff --quiet -- board-watcher/state.txt board-watcher/mohw_press_release_state.txt board-watcher/mohw_press_explain_state.txt; then
             git add board-watcher/state.txt board-watcher/mohw_press_release_state.txt board-watcher/mohw_press_explain_state.txt
             git commit -m "chore: update board-watcher state"
-            git push
+            for i in 1 2 3 4 5; do
+              if git push; then
+                break
+              fi
+              echo "push failed, rebasing onto latest origin/master (attempt $i)"
+              git fetch origin master
+              git rebase origin/master
+              sleep 3
+            done
           fi
