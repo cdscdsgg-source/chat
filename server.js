@@ -1,7 +1,9 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const watch = require("./watch");
+const githubStore = require("./github");
 
 const PORT = process.env.PORT || 5173;
 const PUBLIC_DIR = __dirname;
@@ -137,6 +139,92 @@ async function analyzeUrl(targetUrl) {
   };
 }
 
+function normalizeHrefPattern(href) {
+  return href.replace(/\d+/g, "#");
+}
+
+const DETAIL_LINK_HINT = /(?:view|read|detail|article|post)|(?:[?&](?:no|seq|idx|id|num|wr_id|list_no|seq_no|content_no|docid|artid)=)/i;
+
+async function previewListItems(targetUrl) {
+  // "blocking" errors mean the URL itself is unusable and adding it should be
+  // refused. Non-blocking errors mean we just couldn't confirm the page from
+  // here (e.g. this server's HTTP client chokes on a quirky legacy server) —
+  // the actual GitHub Actions watcher uses Python's urllib and may still work
+  // fine, so we let the user add the board anyway without a preview.
+  let parsed;
+  try {
+    parsed = new URL(targetUrl);
+  } catch {
+    return { ok: false, blocking: true, error: "올바른 URL 형식이 아니에요." };
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return { ok: false, blocking: true, error: "http/https 링크만 지원해요." };
+  }
+  if (isPrivateHost(parsed.hostname)) {
+    return { ok: false, blocking: true, error: "내부/사설 주소는 감시할 수 없어요." };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  let html;
+  try {
+    const r = await fetch(parsed.toString(), {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9",
+      },
+      signal: controller.signal,
+    });
+    if (!r.ok) return { ok: false, blocking: false, error: `페이지를 가져오지 못했어요 (HTTP ${r.status}).` };
+    html = await r.text();
+  } catch {
+    return {
+      ok: false,
+      blocking: false,
+      error: "미리보기에 접속하지 못했어요. 실제 감시는 정상 작동할 수 있어요.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const anchorRe = /<a\s+[^>]*href=["']([^"'#][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const groups = new Map();
+  let m;
+  while ((m = anchorRe.exec(html))) {
+    const rawHref = decodeEntities(m[1]);
+    const text = decodeEntities(stripHtml(m[2]).trim());
+    if (text.length < 4) continue;
+    if (/^(다음|이전|처음|마지막|next|prev|list|목록)$/i.test(text)) continue;
+    if (!DETAIL_LINK_HINT.test(rawHref)) continue;
+    let absHref;
+    try {
+      absHref = new URL(rawHref, parsed).toString();
+    } catch {
+      continue;
+    }
+    const key = normalizeHrefPattern(absHref);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ href: absHref, text });
+  }
+
+  let best = null;
+  for (const items of groups.values()) {
+    if (items.length < 4) continue;
+    if (!best || items.length > best.length) best = items;
+  }
+
+  if (!best) {
+    return {
+      ok: false,
+      blocking: false,
+      error: "이 페이지에서 반복되는 게시글 목록 패턴을 찾지 못했어요. 실제 감시는 정상 작동할 수 있어요.",
+    };
+  }
+
+  return { ok: true, count: best.length, samples: best.slice(0, 5).map((i) => i.text) };
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/api/analyze") {
     let body = "";
@@ -186,6 +274,86 @@ const server = http.createServer(async (req, res) => {
     watch.stopWatch().then(() => {
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ ok: true }));
+    });
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/api/boardwatch/list") {
+    try {
+      const { list } = await githubStore.getWatchList();
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: true, list }));
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/boardwatch/add") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { url } = JSON.parse(body || "{}");
+        if (!url) {
+          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "url이 필요해요." }));
+          return;
+        }
+
+        const preview = await previewListItems(url);
+        if (!preview.ok && preview.blocking) {
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify(preview));
+          return;
+        }
+
+        const { list, sha } = await githubStore.getWatchList();
+        if (list.some((b) => b.url === url)) {
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "이미 감시 중인 주소예요." }));
+          return;
+        }
+
+        const entry = {
+          id: crypto.randomBytes(4).toString("hex"),
+          url,
+          addedAt: new Date().toISOString(),
+        };
+        const updated = [...list, entry];
+        await githubStore.saveWatchList(updated, sha, `chore: watch ${url}`);
+
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, list: updated, preview }));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/boardwatch/remove") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { id } = JSON.parse(body || "{}");
+        if (!id) {
+          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "id가 필요해요." }));
+          return;
+        }
+        const { list, sha } = await githubStore.getWatchList();
+        const updated = list.filter((b) => b.id !== id);
+        await githubStore.saveWatchList(updated, sha, `chore: unwatch ${id}`);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, list: updated }));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
     });
     return;
   }

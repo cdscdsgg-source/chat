@@ -17,46 +17,74 @@
       <p class="subtitle">상품/방송 페이지 링크를 넣으면 제목·설명을 읽어와서, 내용에 맞는 반응 문구를 추천해드려요. 채팅창엔 직접 입력해주세요 — 자동 게시는 하지 않습니다.</p>
     </header>
 
-    <section class="input-row">
-      <input id="url-input" type="url" inputmode="url" placeholder="https://... 상품/방송 페이지 링크를 붙여넣으세요" autocomplete="off" />
-      <button id="analyze-btn" type="button">분석하기</button>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" id="tab-analyze" type="button" role="tab" aria-selected="true">링크 분석</button>
+      <button class="tab" id="tab-boardwatch" type="button" role="tab" aria-selected="false">게시판 알림</button>
+    </nav>
+
+    <section id="panel-analyze" class="panel">
+      <section class="input-row">
+        <input id="url-input" type="url" inputmode="url" placeholder="https://... 상품/방송 페이지 링크를 붙여넣으세요" autocomplete="off" />
+        <button id="analyze-btn" type="button">분석하기</button>
+      </section>
+
+      <p class="status" id="status" aria-live="polite"></p>
+
+      <section class="result" id="result" hidden>
+        <div class="page-card">
+          <div class="page-title" id="page-title"></div>
+          <div class="page-desc" id="page-desc"></div>
+          <div class="chips" id="chips"></div>
+        </div>
+      </section>
+
+      <div class="watch-card">
+        <div class="watch-head">
+          <div>
+            <div class="watch-title">실시간 채팅 감시</div>
+            <div class="watch-sub">네이버 쇼핑라이브 링크일 때만 지원돼요 · 채팅을 읽기만 하고 아무것도 올리지 않아요</div>
+          </div>
+          <button id="watch-btn" type="button">감시 시작</button>
+        </div>
+        <div class="watch-body" id="watch-body" hidden>
+          <div class="watch-stats">
+            <span class="mono" id="watch-rate">0.0 msg/s</span>
+            <span class="watch-viewers mono" id="watch-viewers"></span>
+          </div>
+          <canvas id="watch-canvas"></canvas>
+          <div class="watch-ticker" id="watch-ticker"></div>
+        </div>
+      </div>
+
+      <div class="feed">
+        <div class="feed-head">
+          <h2>추천 문구</h2>
+          <div class="feed-sub">클릭하면 문구가 복사돼요 · 채팅창엔 직접 입력해주세요</div>
+        </div>
+        <div class="feed-list" id="feed-list"></div>
+      </div>
     </section>
 
-    <p class="status" id="status" aria-live="polite"></p>
+    <section id="panel-boardwatch" class="panel" hidden>
+      <p class="subtitle">게시판 목록 페이지 주소를 넣으면 10분마다 새 글이 올라오는지 확인해서 폰으로 알림을 보내드려요.</p>
 
-    <section class="result" id="result" hidden>
-      <div class="page-card">
-        <div class="page-title" id="page-title"></div>
-        <div class="page-desc" id="page-desc"></div>
-        <div class="chips" id="chips"></div>
+      <section class="input-row">
+        <input id="bw-url-input" type="url" inputmode="url" placeholder="https://... 게시판 목록 주소를 붙여넣으세요" autocomplete="off" />
+        <button id="bw-add-btn" type="button">감시 추가</button>
+      </section>
+
+      <p class="status" id="bw-status" aria-live="polite"></p>
+
+      <div class="bw-topic-card">
+        <div class="bw-topic-label">알림 받는 방법</div>
+        <div class="bw-topic-desc">
+          폰에 <b>ntfy</b> 앱을 설치하고 아래 토픽을 구독하면, 감시 중인 게시판에 새 글이 올라올 때마다 알림이 와요.
+        </div>
+        <div class="bw-topic-value mono" id="bw-topic-value"></div>
       </div>
+
+      <div class="bw-list" id="bw-list"></div>
     </section>
-
-    <div class="watch-card">
-      <div class="watch-head">
-        <div>
-          <div class="watch-title">실시간 채팅 감시</div>
-          <div class="watch-sub">네이버 쇼핑라이브 링크일 때만 지원돼요 · 채팅을 읽기만 하고 아무것도 올리지 않아요</div>
-        </div>
-        <button id="watch-btn" type="button">감시 시작</button>
-      </div>
-      <div class="watch-body" id="watch-body" hidden>
-        <div class="watch-stats">
-          <span class="mono" id="watch-rate">0.0 msg/s</span>
-          <span class="watch-viewers mono" id="watch-viewers"></span>
-        </div>
-        <canvas id="watch-canvas"></canvas>
-        <div class="watch-ticker" id="watch-ticker"></div>
-      </div>
-    </div>
-
-    <div class="feed">
-      <div class="feed-head">
-        <h2>추천 문구</h2>
-        <div class="feed-sub">클릭하면 문구가 복사돼요 · 채팅창엔 직접 입력해주세요</div>
-      </div>
-      <div class="feed-list" id="feed-list"></div>
-    </div>
   </div>
 
   <script src="app.js"></script>

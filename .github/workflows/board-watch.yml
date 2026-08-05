@@ -28,12 +28,18 @@ jobs:
       - name: Check MOHW boards for new posts
         run: python board-watcher/mohw_watch.py
 
+      - name: Check user-added boards for new posts
+        run: python board-watcher/generic_watch.py
+
       - name: Commit updated state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- board-watcher/state.txt board-watcher/mohw_press_release_state.txt board-watcher/mohw_press_explain_state.txt; then
-            git add board-watcher/state.txt board-watcher/mohw_press_release_state.txt board-watcher/mohw_press_explain_state.txt
+          git add board-watcher/state.txt board-watcher/mohw_press_release_state.txt board-watcher/mohw_press_explain_state.txt
+          if [ -d board-watcher/generic_state ]; then
+            git add board-watcher/generic_state/
+          fi
+          if ! git diff --cached --quiet; then
             git commit -m "chore: update board-watcher state"
             for i in 1 2 3 4 5; do
               if git push; then
