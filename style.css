@@ -128,7 +128,7 @@ h1 {
   gap: 8px;
 }
 
-#url-input {
+#url-input, #bw-url-input {
   flex: 1;
   min-width: 0;
   background: var(--panel);
@@ -140,16 +140,16 @@ h1 {
   font-family: inherit;
 }
 
-#url-input::placeholder {
+#url-input::placeholder, #bw-url-input::placeholder {
   color: var(--text-dim);
 }
 
-#url-input:focus-visible {
+#url-input:focus-visible, #bw-url-input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-#analyze-btn {
+#analyze-btn, #bw-add-btn {
   background: var(--accent);
   color: #1a1305;
   border: none;
@@ -162,10 +162,22 @@ h1 {
   white-space: nowrap;
 }
 
-#analyze-btn:hover { filter: brightness(1.05); }
-#analyze-btn:active { filter: brightness(0.95); }
-#analyze-btn:disabled { opacity: 0.55; cursor: default; }
-#analyze-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+#analyze-btn:hover, #bw-add-btn:hover { filter: brightness(1.05); }
+#analyze-btn:active, #bw-add-btn:active { filter: brightness(0.95); }
+#analyze-btn:disabled, #bw-add-btn:disabled { opacity: 0.55; cursor: default; }
+#analyze-btn:focus-visible, #bw-add-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+.input-row-lg #bw-url-input {
+  padding: 18px 20px;
+  font-size: 16px;
+  border-radius: 12px;
+}
+
+.input-row-lg #bw-add-btn {
+  padding: 0 26px;
+  font-size: 15px;
+  border-radius: 12px;
+}
 
 .status {
   min-height: 18px;
@@ -484,5 +496,5 @@ h1 {
 
 @media (max-width: 520px) {
   .input-row { flex-direction: column; }
-  #analyze-btn { padding: 12px; }
+  #analyze-btn, #bw-add-btn { padding: 12px; }
 }
