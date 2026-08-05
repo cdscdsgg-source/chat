@@ -5,7 +5,7 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, parse_qs, urlencode
 
 RETRY_ATTEMPTS = 4
 RETRY_DELAY_SECONDS = 5
@@ -32,6 +32,21 @@ CHARSET_PATTERN = re.compile(rb'charset=["\']?([a-zA-Z0-9_-]+)', re.IGNORECASE)
 DETAIL_LINK_HINT = re.compile(
     r"(?:view|read|detail|article|post)|(?:[?&](?:no|seq|idx|id|num|wr_id|list_no|seq_no|content_no|docid|artid)=)",
     re.IGNORECASE,
+)
+
+# Many Korean government sites are built on eGovFrame (전자정부 표준프레임워크),
+# whose board module renders each list row as a plain-looking
+# href="javascript:fn_egov_select('NTT_ID');" link — no real href, so the
+# generic href-pattern heuristic below can't see it (and can pick up
+# something unrelated, like attachment download links, as a false positive
+# instead). Detect this convention specifically and reconstruct the real
+# detail-page URL from the page's own JS and the board URL's own query params.
+EGOV_SELECT_LINK_PATTERN = re.compile(
+    r"href=[\"']javascript:fn_egov_select\('([^']+)'\);?[\"'][^>]*>(.*?)</a>",
+    re.DOTALL | re.IGNORECASE,
+)
+EGOV_ACTION_PATH_PATTERN = re.compile(
+    r"function\s+fn_egov_select\s*\([^)]*\)\s*\{.*?\.action\s*=\s*\"([^\";]+)", re.DOTALL
 )
 
 
@@ -87,7 +102,36 @@ def normalize_pattern(href):
     return re.sub(r"\d+", "#", href)
 
 
+def extract_egov_select_items(html, base_url):
+    action_m = EGOV_ACTION_PATH_PATTERN.search(html)
+    if not action_m:
+        return []
+    parsed_base = urlparse(base_url)
+    qs = parse_qs(parsed_base.query)
+    bbs_id = qs.get("bbsId", [None])[0]
+    if not bbs_id:
+        return []
+    menu_no = qs.get("menuNo", [None])[0]
+    detail_base = urljoin(base_url, action_m.group(1))
+
+    items = []
+    for m in EGOV_SELECT_LINK_PATTERN.finditer(html):
+        ntt_id = m.group(1)
+        title = decode_entities(TAG_PATTERN.sub("", m.group(2)).strip())
+        if len(title) < MIN_TEXT_LEN:
+            continue
+        params = {"searchBbsId1": bbs_id, "searchNttId1": ntt_id}
+        if menu_no:
+            params["menuNo"] = menu_no
+        items.append((f"{detail_base}?{urlencode(params)}", title))
+    return items
+
+
 def extract_items(html, base_url):
+    egov_items = extract_egov_select_items(html, base_url)
+    if egov_items:
+        return egov_items
+
     groups = {}
     for m in ANCHOR_PATTERN.finditer(html):
         raw_href = decode_entities(m.group(1))
