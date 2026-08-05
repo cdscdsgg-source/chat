@@ -266,27 +266,6 @@ window.addEventListener("resize", () => {
   if (watching) fitWatchCanvas();
 });
 
-// ---- 탭 전환 ----
-
-const tabAnalyze = document.getElementById("tab-analyze");
-const tabBoardwatch = document.getElementById("tab-boardwatch");
-const panelAnalyze = document.getElementById("panel-analyze");
-const panelBoardwatch = document.getElementById("panel-boardwatch");
-
-function selectTab(name) {
-  const analyzeActive = name === "analyze";
-  tabAnalyze.classList.toggle("active", analyzeActive);
-  tabBoardwatch.classList.toggle("active", !analyzeActive);
-  tabAnalyze.setAttribute("aria-selected", String(analyzeActive));
-  tabBoardwatch.setAttribute("aria-selected", String(!analyzeActive));
-  panelAnalyze.hidden = !analyzeActive;
-  panelBoardwatch.hidden = analyzeActive;
-  if (!analyzeActive) loadBoardWatchList();
-}
-
-tabAnalyze.addEventListener("click", () => selectTab("analyze"));
-tabBoardwatch.addEventListener("click", () => selectTab("boardwatch"));
-
 // ---- 게시판 알림 ----
 
 const bwUrlInput = document.getElementById("bw-url-input");
@@ -414,3 +393,5 @@ bwAddBtn.addEventListener("click", addBoardWatch);
 bwUrlInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") addBoardWatch();
 });
+
+loadBoardWatchList();

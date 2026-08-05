@@ -108,31 +108,20 @@ h1 {
   color: var(--text-dim);
 }
 
-.tabs {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 18px;
+.section-head {
+  margin-bottom: 14px;
+}
+.section-head h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
 }
 
-.tab {
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
+.section-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 32px 0;
 }
-.tab:hover { border-color: var(--accent); color: var(--text); }
-.tab.active {
-  background: var(--panel);
-  color: var(--text);
-  border-color: var(--accent);
-}
-
-.panel[hidden] { display: none; }
 
 .input-row {
   display: flex;
