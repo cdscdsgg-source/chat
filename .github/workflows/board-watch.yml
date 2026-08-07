@@ -1,8 +1,11 @@
 name: Board Watch
 
 on:
-  schedule:
-    - cron: "*/10 * * * *"
+  # Triggered externally by cron-job.org every 10 minutes. GitHub's own
+  # `schedule:` trigger is intentionally not used here — see commit history:
+  # it was unreliable when first tried (multi-hour delays), and later,
+  # running alongside cron-job.org, it caused duplicate overlapping runs
+  # that piled up and got cancelled in the concurrency queue.
   workflow_dispatch: {}
 
 permissions:
