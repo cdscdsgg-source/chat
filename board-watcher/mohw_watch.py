@@ -18,13 +18,13 @@ BOARDS = [
         "name": "보건복지부 보도자료",
         "list_url": "https://www.mohw.go.kr/board.es?mid=a10503010100&bid=0027",
         "view_url": "https://www.mohw.go.kr/board.es?mid=a10503010100&bid=0027&act=view&list_no={no}",
-        "state_file": HERE / "mohw_press_release_state.txt",
+        "state_file": HERE / "state-cache" / "mohw_press_release.txt",
     },
     {
         "name": "보건복지부 보도설명",
         "list_url": "https://www.mohw.go.kr/board.es?mid=a10504000000&bid=0030",
         "view_url": "https://www.mohw.go.kr/board.es?mid=a10504000000&bid=0030&act=view&list_no={no}",
-        "state_file": HERE / "mohw_press_explain_state.txt",
+        "state_file": HERE / "state-cache" / "mohw_press_explain.txt",
     },
 ]
 
@@ -78,6 +78,7 @@ def read_last_seen(state_file):
 
 
 def write_last_seen(state_file, value):
+    state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(str(value))
 
 

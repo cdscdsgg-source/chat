@@ -15,7 +15,7 @@ NTFY_URL = "https://ntfy.sh/"
 
 HERE = Path(__file__).parent
 WATCHES_FILE = HERE / "site-watches.json"
-STATE_DIR = HERE / "generic_state"
+STATE_DIR = HERE / "state-cache" / "generic"
 
 MAX_SEEN_PER_BOARD = 500
 MIN_GROUP_SIZE = 4
@@ -168,7 +168,7 @@ def read_seen(entry_id):
 
 
 def write_seen(entry_id, seen_hrefs):
-    STATE_DIR.mkdir(exist_ok=True)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
     capped = list(seen_hrefs)[-MAX_SEEN_PER_BOARD:]
     state_file_for(entry_id).write_text(json.dumps({"seen": capped}, ensure_ascii=False, indent=2))
 

@@ -8,9 +8,6 @@ on:
   # that piled up and got cancelled in the concurrency queue.
   workflow_dispatch: {}
 
-permissions:
-  contents: write
-
 concurrency:
   group: board-watch
   cancel-in-progress: false
@@ -25,6 +22,20 @@ jobs:
         with:
           python-version: "3.x"
 
+      # State (last-seen post ids) lives in the Actions cache, not in git.
+      # It used to be committed to the repo, but every commit auto-triggered
+      # a Render redeploy of the unrelated site — ~100+ redeploys/day just
+      # from bot commits with no real code change. Cache keys are immutable,
+      # so we always write a new key for this run and restore the most
+      # recent previous one via the prefix match.
+      - name: Restore board-watcher state
+        uses: actions/cache/restore@v4
+        with:
+          path: board-watcher/state-cache
+          key: board-watcher-state-${{ github.run_id }}
+          restore-keys: |
+            board-watcher-state-
+
       - name: Check todaysppc board for new posts
         run: python board-watcher/watch.py
 
@@ -34,23 +45,9 @@ jobs:
       - name: Check user-added boards for new posts
         run: python board-watcher/generic_watch.py
 
-      - name: Commit updated state
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add board-watcher/state.txt board-watcher/mohw_press_release_state.txt board-watcher/mohw_press_explain_state.txt
-          if [ -d board-watcher/generic_state ]; then
-            git add board-watcher/generic_state/
-          fi
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update board-watcher state"
-            for i in 1 2 3 4 5; do
-              if git push; then
-                break
-              fi
-              echo "push failed, rebasing onto latest origin/master (attempt $i)"
-              git fetch origin master
-              git rebase origin/master
-              sleep 3
-            done
-          fi
+      - name: Save board-watcher state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: board-watcher/state-cache
+          key: board-watcher-state-${{ github.run_id }}

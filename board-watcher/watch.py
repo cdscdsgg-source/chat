@@ -13,7 +13,7 @@ VIEW_URL = "http://w.todaysppc.com/mbbs/view.php?id=free&page=1&no={no}"
 TARGET_AUTHOR = "가을타타타"
 NTFY_TOPIC = "gaeultatata-alert-c7e75b1ffb"
 NTFY_URL = "https://ntfy.sh/"
-STATE_FILE = Path(__file__).parent / "state.txt"
+STATE_FILE = Path(__file__).parent / "state-cache" / "todaysppc.txt"
 
 ROW_PATTERN = re.compile(
     r"<td class=small height=25>(\d+)</td>.*?"
@@ -59,6 +59,7 @@ def read_last_seen():
 
 
 def write_last_seen(value):
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(str(value))
 
 
