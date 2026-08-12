@@ -10,7 +10,11 @@ from urllib.parse import urljoin, urlparse, parse_qs, urlencode
 RETRY_ATTEMPTS = 4
 RETRY_DELAY_SECONDS = 5
 
-NTFY_TOPIC = "site-watch-alert-38c7bf5014"
+DEFAULT_CHANNEL = "default"
+NTFY_TOPICS = {
+    "default": "site-watch-alert-38c7bf5014",
+    "channel2": "site-watch-alert-2-1709d12ce1",
+}
 NTFY_URL = "https://ntfy.sh/"
 
 HERE = Path(__file__).parent
@@ -173,9 +177,9 @@ def write_seen(entry_id, seen_hrefs):
     state_file_for(entry_id).write_text(json.dumps({"seen": capped}, ensure_ascii=False, indent=2))
 
 
-def _notify_once(url, title):
+def _notify_once(topic, url, title):
     payload = {
-        "topic": NTFY_TOPIC,
+        "topic": topic,
         "title": "새 글 알림",
         "message": title,
         "click": url,
@@ -190,13 +194,15 @@ def _notify_once(url, title):
         resp.read()
 
 
-def notify(url, title):
-    with_retries(_notify_once, url, title)
+def notify(topic, url, title):
+    with_retries(_notify_once, topic, url, title)
 
 
 def process_board(entry):
     entry_id = entry["id"]
     board_url = entry["url"]
+    channel = entry.get("channel", DEFAULT_CHANNEL)
+    topic = NTFY_TOPICS.get(channel, NTFY_TOPICS[DEFAULT_CHANNEL])
 
     try:
         html = fetch_html(board_url)
@@ -226,7 +232,7 @@ def process_board(entry):
     notified_hrefs = []
     for href, text in reversed(new_items):  # oldest-looking new item first
         try:
-            notify(href, text)
+            notify(topic, href, text)
         except Exception as exc:
             print(f"[{entry_id}] giving up on notifying {href} this run: {exc}", file=sys.stderr)
             break

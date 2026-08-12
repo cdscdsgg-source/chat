@@ -7,6 +7,7 @@ const githubStore = require("./github");
 
 const PORT = process.env.PORT || 5173;
 const PUBLIC_DIR = __dirname;
+const DEFAULT_CHANNEL = "default";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -278,11 +279,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && req.url === "/api/boardwatch/list") {
+  if (req.method === "GET" && req.url.split("?")[0] === "/api/boardwatch/list") {
     try {
+      const channel = new URL(req.url, "http://x").searchParams.get("channel") || DEFAULT_CHANNEL;
       const { list } = await githubStore.getWatchList();
+      const filtered = list.filter((b) => (b.channel || DEFAULT_CHANNEL) === channel);
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: true, list }));
+      res.end(JSON.stringify({ ok: true, list: filtered }));
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ ok: false, error: err.message }));
@@ -295,12 +298,13 @@ const server = http.createServer(async (req, res) => {
     req.on("data", (chunk) => (body += chunk));
     req.on("end", async () => {
       try {
-        const { url } = JSON.parse(body || "{}");
+        const { url, channel } = JSON.parse(body || "{}");
         if (!url) {
           res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: false, error: "url이 필요해요." }));
           return;
         }
+        const targetChannel = channel || DEFAULT_CHANNEL;
 
         const preview = await previewListItems(url);
         if (!preview.ok && preview.blocking) {
@@ -310,7 +314,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         const { list, sha } = await githubStore.getWatchList();
-        if (list.some((b) => b.url === url)) {
+        if (list.some((b) => b.url === url && (b.channel || DEFAULT_CHANNEL) === targetChannel)) {
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: false, error: "이미 감시 중인 주소예요." }));
           return;
@@ -319,13 +323,20 @@ const server = http.createServer(async (req, res) => {
         const entry = {
           id: crypto.randomBytes(4).toString("hex"),
           url,
+          channel: targetChannel,
           addedAt: new Date().toISOString(),
         };
         const updated = [...list, entry];
         await githubStore.saveWatchList(updated, sha, `chore: watch ${url}`);
 
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, list: updated, preview }));
+        res.end(
+          JSON.stringify({
+            ok: true,
+            list: updated.filter((b) => (b.channel || DEFAULT_CHANNEL) === targetChannel),
+            preview,
+          })
+        );
       } catch (err) {
         res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: err.message }));
@@ -339,17 +350,23 @@ const server = http.createServer(async (req, res) => {
     req.on("data", (chunk) => (body += chunk));
     req.on("end", async () => {
       try {
-        const { id } = JSON.parse(body || "{}");
+        const { id, channel } = JSON.parse(body || "{}");
         if (!id) {
           res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: false, error: "id가 필요해요." }));
           return;
         }
+        const targetChannel = channel || DEFAULT_CHANNEL;
         const { list, sha } = await githubStore.getWatchList();
         const updated = list.filter((b) => b.id !== id);
         await githubStore.saveWatchList(updated, sha, `chore: unwatch ${id}`);
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, list: updated }));
+        res.end(
+          JSON.stringify({
+            ok: true,
+            list: updated.filter((b) => (b.channel || DEFAULT_CHANNEL) === targetChannel),
+          })
+        );
       } catch (err) {
         res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: err.message }));

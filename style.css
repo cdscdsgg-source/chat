@@ -128,7 +128,7 @@ h1 {
   gap: 8px;
 }
 
-#url-input, #bw-url-input {
+#url-input, .board-watch-input {
   flex: 1;
   min-width: 0;
   background: var(--panel);
@@ -140,16 +140,16 @@ h1 {
   font-family: inherit;
 }
 
-#url-input::placeholder, #bw-url-input::placeholder {
+#url-input::placeholder, .board-watch-input::placeholder {
   color: var(--text-dim);
 }
 
-#url-input:focus-visible, #bw-url-input:focus-visible {
+#url-input:focus-visible, .board-watch-input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-#analyze-btn, #bw-add-btn {
+#analyze-btn, .board-watch-btn {
   background: var(--accent);
   color: #1a1305;
   border: none;
@@ -162,18 +162,18 @@ h1 {
   white-space: nowrap;
 }
 
-#analyze-btn:hover, #bw-add-btn:hover { filter: brightness(1.05); }
-#analyze-btn:active, #bw-add-btn:active { filter: brightness(0.95); }
-#analyze-btn:disabled, #bw-add-btn:disabled { opacity: 0.55; cursor: default; }
-#analyze-btn:focus-visible, #bw-add-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+#analyze-btn:hover, .board-watch-btn:hover { filter: brightness(1.05); }
+#analyze-btn:active, .board-watch-btn:active { filter: brightness(0.95); }
+#analyze-btn:disabled, .board-watch-btn:disabled { opacity: 0.55; cursor: default; }
+#analyze-btn:focus-visible, .board-watch-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
-.input-row-lg #bw-url-input {
+.input-row-lg .board-watch-input {
   padding: 18px 20px;
   font-size: 16px;
   border-radius: 12px;
 }
 
-.input-row-lg #bw-add-btn {
+.input-row-lg .board-watch-btn {
   padding: 0 26px;
   font-size: 15px;
   border-radius: 12px;
@@ -496,5 +496,5 @@ h1 {
 
 @media (max-width: 520px) {
   .input-row { flex-direction: column; }
-  #analyze-btn, #bw-add-btn { padding: 12px; }
+  #analyze-btn, .board-watch-btn { padding: 12px; }
 }

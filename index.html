@@ -18,8 +18,8 @@
 
     <section id="panel-boardwatch" class="panel boardwatch-section">
       <section class="input-row input-row-lg">
-        <input id="bw-url-input" type="url" inputmode="url" placeholder="https://... 게시판 목록 주소를 붙여넣으세요" autocomplete="off" />
-        <button id="bw-add-btn" type="button">감시 추가</button>
+        <input id="bw-url-input" class="board-watch-input" type="url" inputmode="url" placeholder="https://... 게시판 목록 주소를 붙여넣으세요" autocomplete="off" />
+        <button id="bw-add-btn" class="board-watch-btn" type="button">감시 추가</button>
       </section>
 
       <p class="status" id="bw-status" aria-live="polite"></p>
@@ -33,6 +33,30 @@
       </div>
 
       <div class="bw-list" id="bw-list"></div>
+    </section>
+
+    <section id="panel-boardwatch-2" class="panel boardwatch-section">
+      <div class="section-head">
+        <h2>게시판 알림 2</h2>
+        <div class="feed-sub">여기서 추가한 건 위 목록과 별도로, 다른 ntfy 토픽으로 알림이 가요.</div>
+      </div>
+
+      <section class="input-row input-row-lg">
+        <input id="bw-url-input-2" class="board-watch-input" type="url" inputmode="url" placeholder="https://... 게시판 목록 주소를 붙여넣으세요" autocomplete="off" />
+        <button id="bw-add-btn-2" class="board-watch-btn" type="button">감시 추가</button>
+      </section>
+
+      <p class="status" id="bw-status-2" aria-live="polite"></p>
+
+      <div class="bw-topic-card">
+        <div class="bw-topic-label">알림 받는 방법</div>
+        <div class="bw-topic-desc">
+          폰에 <b>ntfy</b> 앱을 설치하고 아래 토픽을 구독하면, 감시 중인 게시판에 새 글이 올라올 때마다 알림이 와요.
+        </div>
+        <div class="bw-topic-value mono" id="bw-topic-value-2"></div>
+      </div>
+
+      <div class="bw-list" id="bw-list-2"></div>
     </section>
 
     <hr class="section-divider" />
