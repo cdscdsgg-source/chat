@@ -35,6 +35,21 @@ ROW_ITEM_PATTERN = re.compile(
 TAG_PATTERN = re.compile(r"<[^>]+>")
 DEPT_PATTERN = re.compile(r'data-label="담당부서">([^<]*)</td>')
 
+ENTITIES = {
+    "&amp;": "&",
+    "&lt;": "<",
+    "&gt;": ">",
+    "&quot;": '"',
+    "&#39;": "'",
+    "&#x27;": "'",
+    "&nbsp;": " ",
+}
+ENTITY_PATTERN = re.compile("|".join(re.escape(k) for k in ENTITIES))
+
+
+def decode_entities(s):
+    return ENTITY_PATTERN.sub(lambda m: ENTITIES[m.group(0)], s)
+
 
 def with_retries(func, *args, **kwargs):
     last_exc = None
@@ -59,9 +74,9 @@ def _fetch_rows_once(list_url):
         if not m:
             continue
         no = int(m.group(1))
-        title = TAG_PATTERN.sub("", m.group(2)).replace("새글", "").strip()
+        title = decode_entities(TAG_PATTERN.sub("", m.group(2)).replace("새글", "")).strip()
         dept_m = DEPT_PATTERN.search(block)
-        dept = dept_m.group(1).strip() if dept_m else ""
+        dept = decode_entities(dept_m.group(1)).strip() if dept_m else ""
         rows.append((no, title, dept))
     return rows
 
