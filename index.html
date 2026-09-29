@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>반응 문구 추천기</title>
+<title>게시판 알림 · 유튜브 자막</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -35,81 +35,34 @@
       <div class="bw-list" id="bw-list"></div>
     </section>
 
-    <section id="panel-boardwatch-2" class="panel boardwatch-section">
-      <div class="section-head">
-        <h2>게시판 알림 2</h2>
-        <div class="feed-sub">여기서 추가한 건 위 목록과 별도로, 다른 ntfy 토픽으로 알림이 가요.</div>
-      </div>
-
-      <section class="input-row input-row-lg">
-        <input id="bw-url-input-2" class="board-watch-input" type="url" inputmode="url" placeholder="https://... 게시판 목록 주소를 붙여넣으세요" autocomplete="off" />
-        <button id="bw-add-btn-2" class="board-watch-btn" type="button">감시 추가</button>
-      </section>
-
-      <p class="status" id="bw-status-2" aria-live="polite"></p>
-
-      <div class="bw-topic-card">
-        <div class="bw-topic-label">알림 받는 방법</div>
-        <div class="bw-topic-desc">
-          폰에 <b>ntfy</b> 앱을 설치하고 아래 토픽을 구독하면, 감시 중인 게시판에 새 글이 올라올 때마다 알림이 와요.
-        </div>
-        <div class="bw-topic-value mono" id="bw-topic-value-2"></div>
-      </div>
-
-      <div class="bw-list" id="bw-list-2"></div>
-    </section>
-
     <hr class="section-divider" />
 
-    <section id="panel-analyze" class="panel">
+    <section id="panel-subs" class="panel">
       <div class="section-head">
-        <h2>링크 분석</h2>
-        <div class="feed-sub">상품/방송 페이지 링크를 넣으면 제목·설명을 읽어와서, 내용에 맞는 반응 문구를 추천해드려요.</div>
+        <h2>유튜브 자막</h2>
+        <div class="feed-sub">유튜브 자막이 있으면 그대로 가져오고, 없으면 음성 인식으로 새로 만들어요. 영상은 저장하지 않아요.</div>
       </div>
 
-      <section class="input-row">
-        <input id="url-input" type="url" inputmode="url" placeholder="https://... 상품/방송 페이지 링크를 붙여넣으세요" autocomplete="off" />
-        <button id="analyze-btn" type="button">분석하기</button>
-      </section>
-
-      <p class="status" id="status" aria-live="polite"></p>
-
-      <section class="result" id="result" hidden>
-        <div class="page-card">
-          <div class="page-title" id="page-title"></div>
-          <div class="page-desc" id="page-desc"></div>
-          <div class="chips" id="chips"></div>
-        </div>
-      </section>
-
-      <div class="watch-card">
-        <div class="watch-head">
-          <div>
-            <div class="watch-title">실시간 채팅 감시</div>
-            <div class="watch-sub">네이버 쇼핑라이브 링크일 때만 지원돼요 · 채팅을 읽기만 하고 아무것도 올리지 않아요</div>
-          </div>
-          <button id="watch-btn" type="button">감시 시작</button>
-        </div>
-        <div class="watch-body" id="watch-body" hidden>
-          <div class="watch-stats">
-            <span class="mono" id="watch-rate">0.0 msg/s</span>
-            <span class="watch-viewers mono" id="watch-viewers"></span>
-          </div>
-          <canvas id="watch-canvas"></canvas>
-          <div class="watch-ticker" id="watch-ticker"></div>
-        </div>
+      <div class="subs-block" data-mode="live">
+        <div class="bw-topic-label">라이브 방송 · 지금까지 진행된 부분</div>
+        <section class="input-row input-row-lg">
+          <input class="board-watch-input subs-input" type="url" inputmode="url" placeholder="https://youtube.com/... 라이브 주소를 붙여넣으세요" autocomplete="off" />
+          <button class="board-watch-btn subs-btn" type="button">자막 추출</button>
+        </section>
+        <p class="status subs-status" aria-live="polite"></p>
+        <div class="subs-progress" hidden><div class="subs-progress-bar"></div></div>
+        <div class="subs-result" hidden></div>
       </div>
 
-      <div class="feed">
-        <div class="feed-head">
-          <div class="eyebrow"><span class="tally"></span>Link Analyzer</div>
-          <div class="title-row">
-            <h2>반응 문구 추천기 · 추천 문구</h2>
-            <span class="badge">1회성 페이지 분석</span>
-          </div>
-          <div class="feed-sub">클릭하면 문구가 복사돼요 · 채팅창엔 직접 입력해주세요</div>
-        </div>
-        <div class="feed-list" id="feed-list"></div>
+      <div class="subs-block" data-mode="vod">
+        <div class="bw-topic-label">종료된 영상 · 자막이 없으면 새로 생성</div>
+        <section class="input-row input-row-lg">
+          <input class="board-watch-input subs-input" type="url" inputmode="url" placeholder="https://youtube.com/... 영상 주소를 붙여넣으세요" autocomplete="off" />
+          <button class="board-watch-btn subs-btn" type="button">자막 만들기</button>
+        </section>
+        <p class="status subs-status" aria-live="polite"></p>
+        <div class="subs-progress" hidden><div class="subs-progress-bar"></div></div>
+        <div class="subs-result" hidden></div>
       </div>
     </section>
   </div>

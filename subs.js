@@ -1,0 +1,353 @@
+// 유튜브 자막 추출/생성.
+// - 라이브 진행 중: 방송 시작부터 "요청한 시점"까지의 오디오 조각만 받아 음성 인식
+// - 종료된 영상: 유튜브 자막(수동 한국어 > 원어 자동자막)이 있으면 그대로, 없으면 음성 인식
+// 음성 인식은 Groq Whisper API(GROQ_API_KEY)를 쓰고, 오디오는 자막을 만든 뒤 바로 지운다.
+const { execFile } = require("child_process");
+const crypto = require("crypto");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const ffmpegPath = require("ffmpeg-static");
+
+const BIN_DIR = path.join(os.tmpdir(), "ytsubs-bin");
+const YTDLP_PATH = path.join(BIN_DIR, process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp");
+const YTDLP_URL =
+  "https://github.com/yt-dlp/yt-dlp/releases/latest/download/" +
+  (process.platform === "win32" ? "yt-dlp.exe" : process.platform === "darwin" ? "yt-dlp_macos" : "yt-dlp_linux");
+const YTDLP_MAX_AGE_MS = 24 * 3600 * 1000; // 유튜브가 자주 바뀌어서 하루마다 최신판으로 교체
+
+const GROQ_MODEL = process.env.GROQ_MODEL || "whisper-large-v3";
+const CHUNK_SECONDS = 600;
+const LIVE_MAX_SECONDS = Number(process.env.LIVE_MAX_SECONDS || 6 * 3600);
+const JOB_TTL_MS = 3 * 3600 * 1000;
+
+const jobs = new Map();
+
+// ---------- 도구 ----------
+
+let ytdlpReady = null;
+function ensureYtdlp() {
+  if (!ytdlpReady) {
+    ytdlpReady = (async () => {
+      try {
+        const st = fs.statSync(YTDLP_PATH);
+        if (Date.now() - st.mtimeMs < YTDLP_MAX_AGE_MS) return;
+      } catch {}
+      fs.mkdirSync(BIN_DIR, { recursive: true });
+      const res = await fetch(YTDLP_URL);
+      if (!res.ok) throw new Error(`yt-dlp 다운로드 실패 (HTTP ${res.status})`);
+      const tmp = `${YTDLP_PATH}.download`;
+      fs.writeFileSync(tmp, Buffer.from(await res.arrayBuffer()));
+      fs.chmodSync(tmp, 0o755);
+      fs.renameSync(tmp, YTDLP_PATH);
+    })().finally(() => {
+      // 실패했거나 하루가 지나면 다음 요청 때 다시 확인
+      setTimeout(() => (ytdlpReady = null), 60 * 1000);
+    });
+  }
+  return ytdlpReady;
+}
+
+function run(bin, args, { maxBuffer = 64 * 1024 * 1024 } = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(bin, args, { maxBuffer, windowsHide: true }, (err, stdout, stderr) => {
+      if (err) {
+        err.stderr = String(stderr || "");
+        reject(err);
+      } else resolve(String(stdout));
+    });
+  });
+}
+
+function cookieArgs(workDir) {
+  // 유튜브가 서버 IP를 봇으로 막을 때를 대비해 cookies.txt 내용을 환경변수로 받을 수 있게 한다.
+  if (!process.env.YTDLP_COOKIES) return [];
+  const file = path.join(workDir, "cookies.txt");
+  fs.writeFileSync(file, process.env.YTDLP_COOKIES);
+  return ["--cookies", file];
+}
+
+function friendlyYtdlpError(err) {
+  const msg = err.stderr || err.message || "";
+  if (/confirm you.?re not a bot|Sign in to confirm/i.test(msg)) {
+    return "유튜브가 이 서버의 접속을 봇으로 판단해 막았어요. 잠시 후 다시 시도하거나 서버에 YTDLP_COOKIES를 설정해 주세요.";
+  }
+  if (/Private video|members-only|Join this channel/i.test(msg)) return "비공개/멤버십 영상이라 가져올 수 없어요.";
+  if (/This live event will begin|Premieres in/i.test(msg)) return "아직 시작하지 않은 방송이에요.";
+  if (/Video unavailable/i.test(msg)) return "영상을 찾을 수 없어요.";
+  const last = msg.trim().split("\n").filter((l) => /ERROR/.test(l)).pop();
+  return last ? last.replace(/^ERROR:\s*/, "") : "영상 정보를 가져오지 못했어요.";
+}
+
+// ---------- 유튜브 자막 ----------
+
+function pickYoutubeSubs(info) {
+  const manual = info.subtitles || {};
+  const auto = info.automatic_captions || {};
+  const json3 = (tracks) => (tracks || []).find((t) => t.ext === "json3");
+
+  const ko = json3(manual.ko) || json3(Object.entries(manual).find(([k]) => k.startsWith("ko"))?.[1]);
+  if (ko) return { kind: "유튜브 자막", url: ko.url };
+  // "-orig"가 붙은 트랙이 영상 원래 언어의 자동 자막 (나머지는 기계 번역)
+  const orig = Object.entries(auto).find(([k]) => k.endsWith("-orig"));
+  if (orig && json3(orig[1])) return { kind: "유튜브 자동 자막", url: json3(orig[1]).url };
+  // 한국어가 아닌 수동 자막만 있는 경우 (지난 라이브의 채팅 기록은 자막이 아니므로 제외)
+  const other = Object.entries(manual).find(([k, t]) => k !== "live_chat" && json3(t));
+  if (other) return { kind: `유튜브 자막 (${other[0]})`, url: json3(other[1]).url };
+  return null;
+}
+
+async function fetchYoutubeSubs(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`자막을 가져오지 못했어요 (HTTP ${res.status})`);
+  const data = await res.json();
+  const segments = [];
+  for (const ev of data.events || []) {
+    const text = (ev.segs || []).map((s) => s.utf8 || "").join("").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const start = (ev.tStartMs || 0) / 1000;
+    segments.push({ start, end: start + (ev.dDurationMs || 0) / 1000, text });
+  }
+  return segments;
+}
+
+// ---------- 오디오 ----------
+
+async function downloadLiveUntilNow(info, file, job) {
+  const audio = (info.formats || []).filter((f) => f.vcodec === "none" && f.is_from_start && f.url);
+  if (!audio.length) throw new Error("라이브 오디오를 찾지 못했어요.");
+  // 음성 인식에는 저음질(보통 139, 48kbps)이면 충분하다
+  const fmt = audio.find((f) => f.format_id === "139") || audio.sort((a, b) => (a.abr || 0) - (b.abr || 0))[0];
+  const fragSec = fmt.target_duration || 1;
+
+  const head = await fetch(fmt.url, { method: "HEAD" });
+  const lastSeq = Number(head.headers.get("x-head-seqnum"));
+  if (!Number.isFinite(lastSeq)) throw new Error("라이브 진행 위치를 알 수 없어요.");
+
+  const maxFrags = Math.floor(LIVE_MAX_SECONDS / fragSec);
+  const firstSeq = Math.max(0, lastSeq + 1 - maxFrags);
+  const total = lastSeq + 1 - firstSeq;
+  job.offset = firstSeq * fragSec;
+  if (firstSeq > 0) {
+    job.note = `방송이 길어서 최근 ${Math.round(LIVE_MAX_SECONDS / 3600)}시간 분량만 처리해요.`;
+  }
+
+  const fetchFrag = async (sq) => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const r = await fetch(`${fmt.url}&sq=${sq}`);
+        if (r.ok) return Buffer.from(await r.arrayBuffer());
+      } catch {}
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+    }
+    return Buffer.alloc(0); // 한 조각이 빠져도 전체는 계속 진행
+  };
+
+  const fd = fs.openSync(file, "w");
+  try {
+    const BATCH = 16;
+    for (let i = 0; i < total; i += BATCH) {
+      const seqs = [];
+      for (let sq = firstSeq + i; sq < Math.min(firstSeq + i + BATCH, lastSeq + 1); sq++) seqs.push(sq);
+      for (const buf of await Promise.all(seqs.map(fetchFrag))) fs.writeSync(fd, buf);
+      job.stage = `라이브 오디오 받는 중 (${Math.round((total * fragSec) / 60)}분 분량)`;
+      job.progress = 0.4 * Math.min(1, (i + BATCH) / total);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+async function downloadVodAudio(url, workDir, job) {
+  job.stage = "영상 오디오 받는 중";
+  await run(YTDLP_PATH, [
+    ...cookieArgs(workDir),
+    "--no-playlist", "--no-part", "--no-warnings", "-q",
+    "-f", "139/bestaudio[ext=m4a]/bestaudio/worst",
+    "-o", path.join(workDir, "audio.%(ext)s"),
+    url,
+  ]);
+  const name = fs.readdirSync(workDir).find((f) => f.startsWith("audio."));
+  if (!name) throw new Error("오디오를 받지 못했어요.");
+  return path.join(workDir, name);
+}
+
+// 16kHz 모노 opus로 줄이고 10분 단위로 자른다 (Groq 파일 크기 제한 대응)
+async function splitAudio(input, workDir) {
+  const listFile = path.join(workDir, "chunks.csv");
+  await run(ffmpegPath, [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-i", input, "-vn", "-ac", "1", "-ar", "16000",
+    "-c:a", "libopus", "-b:a", "24k",
+    "-f", "segment", "-segment_time", String(CHUNK_SECONDS), "-reset_timestamps", "1",
+    "-segment_list", listFile, "-segment_list_type", "csv",
+    path.join(workDir, "chunk%03d.ogg"),
+  ]);
+  return fs
+    .readFileSync(listFile, "utf-8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [name, start] = line.split(",");
+      return { file: path.join(workDir, name), start: Number(start) };
+    });
+}
+
+// ---------- 음성 인식 (Groq) ----------
+
+const HALLUCINATIONS = /^(시청해 ?주셔서 감사합니다|구독과 좋아요|MBC 뉴스|자막 제공)/;
+
+async function transcribeChunk(chunk) {
+  for (let attempt = 0; ; attempt++) {
+    const form = new FormData();
+    form.append("file", new Blob([fs.readFileSync(chunk.file)], { type: "audio/ogg" }), path.basename(chunk.file));
+    form.append("model", GROQ_MODEL);
+    form.append("response_format", "verbose_json");
+    form.append("temperature", "0");
+    const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+      body: form,
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return (data.segments || [])
+        .filter((s) => !(s.no_speech_prob > 0.8 && s.avg_logprob < -0.7))
+        .map((s) => ({ start: chunk.start + s.start, end: chunk.start + s.end, text: s.text.trim() }))
+        .filter((s) => s.text && !HALLUCINATIONS.test(s.text));
+    }
+    const body = await res.text();
+    if ((res.status === 429 || res.status >= 500) && attempt < 6) {
+      const wait = Number(res.headers.get("retry-after")) || 10 * (attempt + 1);
+      await new Promise((r) => setTimeout(r, Math.min(wait, 120) * 1000));
+      continue;
+    }
+    if (res.status === 401) throw new Error("Groq API 키가 올바르지 않아요.");
+    if (res.status === 429) throw new Error("Groq 무료 사용량 한도에 도달했어요. 잠시 후 다시 시도해 주세요.");
+    throw new Error(`음성 인식 실패 (HTTP ${res.status}): ${body.slice(0, 200)}`);
+  }
+}
+
+async function transcribeAll(chunks, job) {
+  const results = new Array(chunks.length);
+  let done = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < chunks.length) {
+      const i = next++;
+      results[i] = await transcribeChunk(chunks[i]);
+      done++;
+      job.stage = `음성 인식 중 (${done}/${chunks.length})`;
+      job.progress = 0.5 + 0.5 * (done / chunks.length);
+    }
+  };
+  job.stage = `음성 인식 중 (0/${chunks.length})`;
+  await Promise.all([worker(), worker()]);
+  return results.flat();
+}
+
+// ---------- 작업 ----------
+
+function isYoutubeUrl(u) {
+  try {
+    const h = new URL(u).hostname.replace(/^www\.|^m\./, "");
+    return ["youtube.com", "youtu.be", "music.youtube.com"].includes(h);
+  } catch {
+    return false;
+  }
+}
+
+async function runJob(job) {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "ytsubs-"));
+  try {
+    job.stage = "준비 중";
+    await ensureYtdlp();
+
+    job.stage = "영상 정보 확인 중";
+    let info;
+    try {
+      const out = await run(YTDLP_PATH, [
+        ...cookieArgs(workDir), "-J", "--no-playlist", "--no-warnings", "--live-from-start", job.url,
+      ]);
+      info = JSON.parse(out);
+    } catch (err) {
+      throw new Error(friendlyYtdlpError(err));
+    }
+    job.title = info.title || info.id;
+    job.live = info.live_status === "is_live";
+    if (info.live_status === "is_upcoming") throw new Error("아직 시작하지 않은 방송이에요.");
+    if (job.mode === "live" && !job.live) job.note = "라이브가 아니라서 종료된 영상으로 처리해요.";
+    if (job.mode === "vod" && job.live) job.note = "진행 중인 라이브라서 지금까지 방송된 부분을 처리해요.";
+
+    if (!job.live) {
+      const subs = pickYoutubeSubs(info);
+      if (subs) {
+        job.stage = `${subs.kind} 가져오는 중`;
+        job.segments = await fetchYoutubeSubs(subs.url);
+        job.source = subs.kind;
+        return;
+      }
+    }
+
+    if (!process.env.GROQ_API_KEY) throw new Error("유튜브 자막이 없고, 서버에 GROQ_API_KEY가 없어 자막을 만들 수 없어요.");
+    job.source = "음성 인식 (Whisper)";
+
+    let audioFile;
+    if (job.live) {
+      job.cutoff = new Date().toISOString();
+      audioFile = path.join(workDir, "live.m4a");
+      await downloadLiveUntilNow(info, audioFile, job);
+    } else {
+      audioFile = await downloadVodAudio(job.url, workDir, job);
+    }
+
+    job.stage = "오디오 변환 중";
+    job.progress = 0.45;
+    const chunks = await splitAudio(audioFile, workDir);
+    fs.rmSync(audioFile, { force: true });
+    if (job.offset) for (const c of chunks) c.start += job.offset;
+    job.segments = await transcribeAll(chunks, job);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+function startJob(url, mode) {
+  if (!isYoutubeUrl(url)) return { ok: false, error: "유튜브 주소만 넣을 수 있어요." };
+  const running = [...jobs.values()].find((j) => j.status === "running");
+  if (running) return { ok: false, error: "다른 자막 작업이 진행 중이에요. 끝난 뒤 다시 시도해 주세요." };
+
+  const job = {
+    id: crypto.randomBytes(6).toString("hex"),
+    url,
+    mode,
+    status: "running",
+    stage: "대기 중",
+    progress: 0,
+    createdAt: Date.now(),
+  };
+  jobs.set(job.id, job);
+  runJob(job)
+    .then(() => {
+      job.status = "done";
+      job.stage = "완료";
+      job.progress = 1;
+    })
+    .catch((err) => {
+      job.status = "error";
+      job.error = err.message || "알 수 없는 오류가 발생했어요.";
+    });
+
+  for (const [id, j] of jobs) if (Date.now() - j.createdAt > JOB_TTL_MS) jobs.delete(id);
+  return { ok: true, id: job.id };
+}
+
+function getJob(id) {
+  const job = jobs.get(id);
+  if (!job) return null;
+  const { url, createdAt, ...pub } = job;
+  return pub;
+}
+
+module.exports = { startJob, getJob };

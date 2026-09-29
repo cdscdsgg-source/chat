@@ -2,12 +2,15 @@
   "name": "reaction-phrase-recommender",
   "version": "1.0.0",
   "private": true,
-  "description": "링크 분석 + 네이버 쇼핑라이브 실시간 채팅 감시로 반응 문구를 추천하는 도구",
+  "description": "게시판 새 글 알림 + 유튜브 라이브/영상 자막 추출",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0"
   }
 }

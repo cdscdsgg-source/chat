@@ -1,271 +1,3 @@
-const urlInput = document.getElementById("url-input");
-const analyzeBtn = document.getElementById("analyze-btn");
-const statusEl = document.getElementById("status");
-const resultEl = document.getElementById("result");
-const pageTitleEl = document.getElementById("page-title");
-const pageDescEl = document.getElementById("page-desc");
-const chipsEl = document.getElementById("chips");
-const feedListEl = document.getElementById("feed-list");
-
-function setStatus(text, isError) {
-  statusEl.textContent = text || "";
-  statusEl.classList.toggle("error", Boolean(isError));
-}
-
-function renderChips(keywords) {
-  chipsEl.innerHTML = "";
-  const entries = Object.entries(keywords || {});
-  if (!entries.length) return;
-  for (const [key, group] of entries) {
-    const chip = document.createElement("span");
-    chip.className = `chip ${key}`;
-    chip.textContent = `${group.label} · ${group.matched.join(", ")}`;
-    chipsEl.appendChild(chip);
-  }
-}
-
-function addCueCard(phrase, { time, reason, prepend } = {}) {
-  const card = document.createElement("button");
-  card.type = "button";
-  card.className = "cue-card";
-  card.innerHTML =
-    (time ? `<div class="cue-time mono">${time}</div>` : "") +
-    `<div class="cue-phrase">"${phrase}"</div>` +
-    (reason ? `<div class="cue-reason">${reason}</div>` : "") +
-    `<div class="cue-copied">복사됨 · 채팅창에 붙여넣어보세요</div>`;
-  card.addEventListener("click", () => {
-    const copiedEl = card.querySelector(".cue-copied");
-    if (navigator.clipboard) navigator.clipboard.writeText(phrase).catch(() => {});
-    copiedEl.classList.add("show");
-    setTimeout(() => copiedEl.classList.remove("show"), 1500);
-  });
-  if (prepend) feedListEl.prepend(card);
-  else feedListEl.appendChild(card);
-
-  const cards = feedListEl.querySelectorAll(".cue-card");
-  if (cards.length > 30) cards[cards.length - 1].remove();
-}
-
-function renderPhrases(phrases) {
-  feedListEl.innerHTML = "";
-  for (const phrase of phrases) addCueCard(phrase);
-}
-
-async function analyze() {
-  const url = urlInput.value.trim();
-  if (!url) {
-    setStatus("링크를 먼저 입력해주세요.", true);
-    return;
-  }
-
-  analyzeBtn.disabled = true;
-  resultEl.hidden = true;
-  setStatus("페이지 내용을 가져오는 중…");
-
-  try {
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    const data = await res.json();
-
-    if (!data.ok) {
-      setStatus(data.error || "분석에 실패했어요.", true);
-      return;
-    }
-
-    pageTitleEl.textContent = data.title;
-    pageDescEl.textContent = data.description || "설명을 찾지 못했어요.";
-    renderChips(data.keywords);
-    renderPhrases(data.phrases);
-    resultEl.hidden = false;
-    setStatus("");
-  } catch (err) {
-    setStatus("서버에 연결할 수 없었어요.", true);
-  } finally {
-    analyzeBtn.disabled = false;
-  }
-}
-
-analyzeBtn.addEventListener("click", analyze);
-urlInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") analyze();
-});
-
-// ---- 실시간 채팅 감시 ----
-
-const watchBtn = document.getElementById("watch-btn");
-const watchBody = document.getElementById("watch-body");
-const watchCardEl = document.querySelector(".watch-card");
-const watchRateEl = document.getElementById("watch-rate");
-const watchViewersEl = document.getElementById("watch-viewers");
-const watchCanvas = document.getElementById("watch-canvas");
-const watchCtx = watchCanvas.getContext("2d");
-const watchTickerEl = document.getElementById("watch-ticker");
-
-const WATCH_HISTORY_LEN = 60;
-const watchHistory = new Array(WATCH_HISTORY_LEN).fill(0);
-let eventSource = null;
-let watching = false;
-
-function fitWatchCanvas() {
-  const rect = watchCanvas.getBoundingClientRect();
-  watchCanvas.width = rect.width;
-  watchCanvas.height = rect.height;
-}
-
-function drawWatchSparkline() {
-  const w = watchCanvas.width;
-  const h = watchCanvas.height;
-  if (!w || !h) return;
-  watchCtx.clearRect(0, 0, w, h);
-
-  const maxVal = Math.max(4, ...watchHistory);
-  const stepX = w / (WATCH_HISTORY_LEN - 1);
-  const yAt = (v) => h - (v / maxVal) * (h - 8) - 4;
-
-  const grad = watchCtx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, "#52d6ff50");
-  grad.addColorStop(1, "#52d6ff00");
-
-  watchCtx.beginPath();
-  watchHistory.forEach((v, i) => {
-    const x = i * stepX, y = yAt(v);
-    if (i === 0) watchCtx.moveTo(x, y);
-    else watchCtx.lineTo(x, y);
-  });
-  watchCtx.lineTo((watchHistory.length - 1) * stepX, h);
-  watchCtx.lineTo(0, h);
-  watchCtx.closePath();
-  watchCtx.fillStyle = grad;
-  watchCtx.fill();
-
-  watchCtx.beginPath();
-  watchHistory.forEach((v, i) => {
-    const x = i * stepX, y = yAt(v);
-    if (i === 0) watchCtx.moveTo(x, y);
-    else watchCtx.lineTo(x, y);
-  });
-  watchCtx.strokeStyle = "#52d6ff";
-  watchCtx.lineWidth = 2;
-  watchCtx.stroke();
-}
-
-function addTickerLine(nickname, message) {
-  const line = document.createElement("div");
-  line.className = "tick-item";
-  line.innerHTML = `<b>${escapeHtml(nickname)}</b>${escapeHtml(message)}`;
-  watchTickerEl.prepend(line);
-  while (watchTickerEl.children.length > 12) {
-    watchTickerEl.removeChild(watchTickerEl.lastChild);
-  }
-}
-
-function escapeHtml(s) {
-  const div = document.createElement("div");
-  div.textContent = s;
-  return div.innerHTML;
-}
-
-function flashWatchCard() {
-  watchCardEl.classList.add("spike");
-  setTimeout(() => watchCardEl.classList.remove("spike"), 900);
-}
-
-function connectStream() {
-  eventSource = new EventSource("/api/watch/stream");
-  eventSource.onmessage = (e) => {
-    let data;
-    try {
-      data = JSON.parse(e.data);
-    } catch {
-      return;
-    }
-
-    if (data.type === "tick") {
-      watchHistory.push(data.msgPerSec);
-      if (watchHistory.length > WATCH_HISTORY_LEN) watchHistory.shift();
-      watchRateEl.textContent = `${data.msgPerSec.toFixed(1)} msg/s`;
-      if (data.viewerCount != null) {
-        watchViewersEl.textContent = `시청자 ${data.viewerCount.toLocaleString("ko-KR")}명`;
-      }
-      drawWatchSparkline();
-    } else if (data.type === "chat") {
-      addTickerLine(data.nickname, data.message);
-    } else if (data.type === "cue") {
-      addCueCard(data.phrase, { time: data.time, reason: `실시간 채팅 · ${data.reason}`, prepend: true });
-      flashWatchCard();
-    }
-  };
-  eventSource.onerror = () => {
-    // connection dropped (e.g. watch stopped server-side); reflect stopped state
-    if (watching) stopWatching(true);
-  };
-}
-
-async function startWatching() {
-  const url = urlInput.value.trim();
-  if (!url) {
-    setStatus("먼저 링크를 입력해주세요.", true);
-    return;
-  }
-  watchBtn.disabled = true;
-  watchBtn.textContent = "연결 중…";
-
-  try {
-    const res = await fetch("/api/watch/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    const data = await res.json();
-    if (!data.ok) {
-      setStatus(data.error || "감시를 시작하지 못했어요.", true);
-      watchBtn.textContent = "감시 시작";
-      return;
-    }
-
-    watching = true;
-    watchHistory.fill(0);
-    watchTickerEl.innerHTML = "";
-    watchBody.hidden = false;
-    fitWatchCanvas();
-    watchBtn.textContent = "감시 중지";
-    watchBtn.classList.add("active");
-    connectStream();
-  } catch (err) {
-    setStatus("서버에 연결할 수 없었어요.", true);
-    watchBtn.textContent = "감시 시작";
-  } finally {
-    watchBtn.disabled = false;
-  }
-}
-
-async function stopWatching(silent) {
-  watching = false;
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
-  }
-  watchBtn.textContent = "감시 시작";
-  watchBtn.classList.remove("active");
-  if (!silent) {
-    try {
-      await fetch("/api/watch/stop", { method: "POST" });
-    } catch {}
-  }
-}
-
-watchBtn.addEventListener("click", () => {
-  if (watching) stopWatching(false);
-  else startWatching();
-});
-
-window.addEventListener("resize", () => {
-  if (watching) fitWatchCanvas();
-});
-
 // ---- 게시판 알림 ----
 
 function initBoardWatchSection({ channel, ntfyTopic, idSuffix }) {
@@ -398,4 +130,180 @@ function initBoardWatchSection({ channel, ntfyTopic, idSuffix }) {
 }
 
 initBoardWatchSection({ channel: "default", ntfyTopic: "site-watch-alert-38c7bf5014", idSuffix: "" });
-initBoardWatchSection({ channel: "channel2", ntfyTopic: "site-watch-alert-2-1709d12ce1", idSuffix: "-2" });
+
+// ---- 유튜브 자막 ----
+
+function fmtTime(sec, withMs) {
+  const ms = Math.max(0, Math.round(sec * 1000));
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  const pad = (n, w = 2) => String(n).padStart(w, "0");
+  const base = `${pad(h)}:${pad(m)}:${pad(s)}`;
+  return withMs ? `${base},${pad(ms % 1000, 3)}` : base;
+}
+
+function toSrt(segments) {
+  return segments
+    .map((seg, i) => `${i + 1}\n${fmtTime(seg.start, true)} --> ${fmtTime(seg.end, true)}\n${seg.text}\n`)
+    .join("\n");
+}
+
+function toTxt(segments) {
+  return segments.map((seg) => `[${fmtTime(seg.start)}] ${seg.text}`).join("\n");
+}
+
+function downloadFile(name, content) {
+  const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function initSubsBlock(block) {
+  const mode = block.dataset.mode;
+  const input = block.querySelector(".subs-input");
+  const btn = block.querySelector(".subs-btn");
+  const statusEl = block.querySelector(".subs-status");
+  const progressEl = block.querySelector(".subs-progress");
+  const barEl = block.querySelector(".subs-progress-bar");
+  const resultEl = block.querySelector(".subs-result");
+  const btnLabel = btn.textContent;
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text || "";
+    statusEl.classList.toggle("error", Boolean(isError));
+  }
+
+  function finish() {
+    btn.disabled = false;
+    btn.textContent = btnLabel;
+    progressEl.hidden = true;
+  }
+
+  function renderResult(job) {
+    const segments = job.segments || [];
+    const fileBase = (job.title || "subtitles").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80);
+    resultEl.innerHTML = "";
+
+    const head = document.createElement("div");
+    head.className = "subs-result-head";
+    const info = document.createElement("div");
+    info.style.minWidth = "0";
+    const title = document.createElement("div");
+    title.className = "subs-result-title";
+    title.textContent = job.title || "";
+    const meta = document.createElement("div");
+    meta.className = "subs-result-meta";
+    const cutoff = job.cutoff ? ` · ${new Date(job.cutoff).toLocaleTimeString("ko-KR")}까지` : "";
+    meta.textContent = `${job.source} · ${segments.length}줄${cutoff}`;
+    info.append(title, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "subs-actions";
+    const mkBtn = (label, onClick) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "subs-action";
+      b.textContent = label;
+      b.addEventListener("click", onClick);
+      actions.appendChild(b);
+    };
+    mkBtn("복사", () => {
+      if (navigator.clipboard) navigator.clipboard.writeText(toTxt(segments)).catch(() => {});
+      setStatus("자막을 복사했어요.");
+    });
+    mkBtn("TXT", () => downloadFile(`${fileBase}.txt`, toTxt(segments)));
+    mkBtn("SRT", () => downloadFile(`${fileBase}.srt`, toSrt(segments)));
+    head.append(info, actions);
+
+    const lines = document.createElement("div");
+    lines.className = "subs-lines";
+    if (!segments.length) {
+      lines.textContent = "인식된 말소리가 없어요.";
+    }
+    for (const seg of segments) {
+      const row = document.createElement("div");
+      row.className = "subs-line";
+      const t = document.createElement("span");
+      t.className = "subs-time mono";
+      t.textContent = fmtTime(seg.start);
+      const text = document.createElement("span");
+      text.textContent = seg.text;
+      row.append(t, text);
+      lines.appendChild(row);
+    }
+
+    resultEl.append(head, lines);
+    resultEl.hidden = false;
+  }
+
+  async function poll(id) {
+    try {
+      const res = await fetch(`/api/subs/status?id=${encodeURIComponent(id)}`);
+      const data = await res.json();
+      if (!data.ok) {
+        setStatus(data.error || "작업 상태를 확인하지 못했어요.", true);
+        finish();
+        return;
+      }
+      const job = data.job;
+      barEl.style.width = `${Math.round((job.progress || 0) * 100)}%`;
+      if (job.status === "running") {
+        setStatus([job.title, job.stage, job.note].filter(Boolean).join(" · "));
+        setTimeout(() => poll(id), 2000);
+        return;
+      }
+      finish();
+      if (job.status === "error") {
+        setStatus(job.error, true);
+        return;
+      }
+      setStatus(job.note || "");
+      renderResult(job);
+    } catch {
+      // 일시적인 연결 끊김은 다시 시도
+      setTimeout(() => poll(id), 4000);
+    }
+  }
+
+  async function start() {
+    const url = input.value.trim();
+    if (!url) {
+      setStatus("유튜브 주소를 먼저 입력해주세요.", true);
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "진행 중…";
+    resultEl.hidden = true;
+    barEl.style.width = "0";
+    progressEl.hidden = false;
+    setStatus("요청을 보내는 중…");
+    try {
+      const res = await fetch("/api/subs/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, mode }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setStatus(data.error || "시작하지 못했어요.", true);
+        finish();
+        return;
+      }
+      poll(data.id);
+    } catch {
+      setStatus("서버에 연결할 수 없었어요.", true);
+      finish();
+    }
+  }
+
+  btn.addEventListener("click", start);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !btn.disabled) start();
+  });
+}
+
+document.querySelectorAll(".subs-block").forEach(initSubsBlock);
