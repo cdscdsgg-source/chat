@@ -2,3 +2,5 @@ node_modules/
 __pycache__/
 board-watcher/state-cache/
 
+groq-key.txt
+yt-subtitle/
