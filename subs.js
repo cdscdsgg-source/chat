@@ -28,6 +28,25 @@ const JOB_TTL_MS = 3 * 3600 * 1000;
 
 const jobs = new Map();
 
+// 라이브는 같은 방송을 여러 번 요청하므로, 인식한 자막과 처리한 위치를 영상별로 저장해 두고
+// 다음 요청 때는 그 뒤에 새로 방송된 부분만 인식한다.
+const CACHE_DIR = path.join(__dirname, "subs-cache");
+
+function loadLiveCache(videoId) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(CACHE_DIR, `${videoId}.json`), "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function saveLiveCache(videoId, data) {
+  try {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(path.join(CACHE_DIR, `${videoId}.json`), JSON.stringify(data));
+  } catch {}
+}
+
 // ---------- 도구 ----------
 
 let ytdlpReady = null;
@@ -119,7 +138,8 @@ async function fetchYoutubeSubs(url) {
 
 // ---------- 오디오 ----------
 
-async function downloadLiveUntilNow(info, file, job) {
+// resumeSec부터 지금까지의 오디오를 받는다. 새로 방송된 부분이 없으면 { frags: 0 }.
+async function downloadLiveUntilNow(info, file, job, resumeSec = 0) {
   const audio = (info.formats || []).filter((f) => f.vcodec === "none" && f.is_from_start && f.url);
   if (!audio.length) throw new Error("라이브 오디오를 찾지 못했어요.");
   // 음성 인식에는 저음질(보통 139, 48kbps)이면 충분하다
@@ -130,13 +150,22 @@ async function downloadLiveUntilNow(info, file, job) {
   const lastSeq = Number(head.headers.get("x-head-seqnum"));
   if (!Number.isFinite(lastSeq)) throw new Error("라이브 진행 위치를 알 수 없어요.");
 
+  let resumeSeq = Math.floor(resumeSec / fragSec);
+  let reset = false;
+  if (resumeSeq > lastSeq + 1) {
+    // 저장된 위치가 현재 방송보다 뒤라면 방송이 새로 시작된 것
+    resumeSeq = 0;
+    reset = true;
+  }
   const maxFrags = Math.floor(LIVE_MAX_SECONDS / fragSec);
-  const firstSeq = Math.max(0, lastSeq + 1 - maxFrags);
+  const firstSeq = Math.max(resumeSeq, lastSeq + 1 - maxFrags);
   const total = lastSeq + 1 - firstSeq;
   job.offset = firstSeq * fragSec;
-  if (firstSeq > 0) {
-    job.note = `방송이 길어서 최근 ${Math.round(LIVE_MAX_SECONDS / 3600)}시간 분량만 처리해요.`;
+  if (firstSeq > resumeSeq) {
+    const span = LIVE_MAX_SECONDS >= 3600 ? `${Math.round(LIVE_MAX_SECONDS / 3600)}시간` : `${Math.round(LIVE_MAX_SECONDS / 60)}분`;
+    job.note = `방송이 길어서 최근 ${span} 분량만 처리해요.`;
   }
+  if (total <= 0) return { frags: 0, reset };
 
   const fetchFrag = async (sq) => {
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -162,6 +191,7 @@ async function downloadLiveUntilNow(info, file, job) {
   } finally {
     fs.closeSync(fd);
   }
+  return { frags: total, reset };
 }
 
 async function downloadVodAudio(url, workDir, job) {
@@ -195,8 +225,8 @@ async function splitAudio(input, workDir) {
     .split("\n")
     .filter(Boolean)
     .map((line) => {
-      const [name, start] = line.split(",");
-      return { file: path.join(workDir, name), start: Number(start) };
+      const [name, start, end] = line.split(",");
+      return { file: path.join(workDir, name), start: Number(start), end: Number(end) };
     });
 }
 
@@ -255,14 +285,14 @@ async function transcribeAll(chunks, job) {
 
 // ---------- 음성 인식 (로컬 faster-whisper) ----------
 
-function transcribeLocal(chunks, job) {
+function transcribeLocal(chunks, job, onChunkDone) {
   return new Promise((resolve, reject) => {
     const [bin, ...pre] = WHISPER_PYTHON;
     const proc = spawn(bin, [...pre, path.join(__dirname, "whisper_local.py"), LOCAL_WHISPER_MODEL, ...chunks.map((c) => c.file)], {
       windowsHide: true,
       env: { ...process.env, PYTHONIOENCODING: "utf-8" },
     });
-    job.segments = []; // 인식되는 대로 화면에 보여주기 위해 바로 채운다
+    job.segments = job.segments || []; // 인식되는 대로 화면에 보여주기 위해 바로 채운다
     job.stage = `PC에서 음성 인식 중 (0/${chunks.length}) · 처음엔 모델을 내려받아요`;
     let buf = "";
     let stderr = "";
@@ -284,6 +314,7 @@ function transcribeLocal(chunks, job) {
           const done = msg.chunk_done + 1;
           job.stage = `PC에서 음성 인식 중 (${done}/${chunks.length})`;
           job.progress = 0.5 + 0.5 * (done / chunks.length);
+          if (onChunkDone) onChunkDone(chunks[msg.chunk_done]);
         } else if (!HALLUCINATIONS.test(msg.text)) {
           const offset = chunks[msg.chunk].start;
           job.segments.push({ start: offset + msg.start, end: offset + msg.end, text: msg.text });
@@ -358,10 +389,35 @@ async function runJob(job) {
     job.source = useGroq ? "음성 인식 (Groq Whisper)" : "음성 인식 (PC Whisper)";
 
     let audioFile;
+    let saveProgress = () => {};
     if (job.live) {
       job.cutoff = new Date().toISOString();
+      const cache = loadLiveCache(info.id);
+      let base = [];
+      let resumeSec = 0;
+      if (cache) {
+        base = cache.segments || [];
+        resumeSec = cache.processedUntil || 0;
+        // 지난번 마지막 문장은 구간 끝에서 잘렸을 수 있으니 그 문장부터 다시 인식한다
+        const last = base[base.length - 1];
+        if (last && last.end > resumeSec - 3) {
+          resumeSec = last.start;
+          base = base.slice(0, -1);
+        }
+      }
+
       audioFile = path.join(workDir, "live.m4a");
-      await downloadLiveUntilNow(info, audioFile, job);
+      const got = await downloadLiveUntilNow(info, audioFile, job, resumeSec);
+      if (got.reset) base = [];
+      if (!got.frags) {
+        job.segments = cache ? cache.segments : [];
+        job.note = "지난번 이후 새로 방송된 부분이 없어요.";
+        return;
+      }
+      if (base.length) job.note = `${fmtClock(resumeSec)}까지는 지난번에 인식한 자막을 쓰고, 그 뒤부터 인식해요.`;
+      job.segments = base.slice();
+      saveProgress = (until) =>
+        saveLiveCache(info.id, { title: job.title, processedUntil: until, segments: job.segments });
     } else {
       audioFile = await downloadVodAudio(job.url, workDir, job);
     }
@@ -370,8 +426,19 @@ async function runJob(job) {
     job.progress = 0.45;
     const chunks = await splitAudio(audioFile, workDir);
     fs.rmSync(audioFile, { force: true });
-    if (job.offset) for (const c of chunks) c.start += job.offset;
-    job.segments = useGroq ? await transcribeAll(chunks, job) : await transcribeLocal(chunks, job);
+    if (job.offset) {
+      for (const c of chunks) {
+        c.start += job.offset;
+        c.end += job.offset;
+      }
+    }
+    if (useGroq) {
+      job.segments = [...(job.segments || []), ...(await transcribeAll(chunks, job))];
+    } else {
+      // 청크 하나가 끝날 때마다 저장해서, 중간에 멈춰도 다음번엔 이어서 인식한다
+      await transcribeLocal(chunks, job, (c) => saveProgress(c.end));
+    }
+    if (chunks.length) saveProgress(chunks[chunks.length - 1].end);
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
