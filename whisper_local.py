@@ -7,6 +7,7 @@ stdout으로 한 줄에 JSON 하나씩 내보낸다:
 """
 import json
 import os
+import re
 import sys
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
@@ -19,6 +20,17 @@ def emit(obj):
     sys.stdout.flush()
 
 
+def split_sentences(start, end, text):
+    """배치 처리는 ~30초씩 묶어 내보내므로, 문장 단위로 나누고 시간은 글자 수 비율로 나눈다."""
+    parts = [p.strip() for p in re.split(r"(?<=[.?!])\s+", text) if p.strip()]
+    total = sum(len(p) for p in parts) or 1
+    t = start
+    for p in parts:
+        dur = (end - start) * len(p) / total
+        yield t, t + dur, p
+        t += dur
+
+
 def main():
     model_name, files = sys.argv[1], sys.argv[2:]
     model = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=os.cpu_count() or 4)
@@ -27,9 +39,8 @@ def main():
     for i, f in enumerate(files):
         segments, _ = pipeline.transcribe(f, batch_size=8, beam_size=1)
         for s in segments:
-            text = s.text.strip()
-            if text:
-                emit({"chunk": i, "start": s.start, "end": s.end, "text": text})
+            for st, en, text in split_sentences(s.start, s.end, s.text.strip()):
+                emit({"chunk": i, "start": round(st, 2), "end": round(en, 2), "text": text})
         emit({"chunk_done": i})
 
 
