@@ -74,8 +74,9 @@ function cookieArgs(workDir) {
 
 function friendlyYtdlpError(err) {
   const msg = err.stderr || err.message || "";
-  if (/confirm you.?re not a bot|Sign in to confirm/i.test(msg)) {
-    return "유튜브가 이 서버의 접속을 봇으로 판단해 막았어요. 잠시 후 다시 시도하거나 서버에 YTDLP_COOKIES를 설정해 주세요.";
+  // 클라우드 서버(Render 등) IP는 유튜브가 막는다. 막힐 때 오류 문구가 여러 가지로 나온다.
+  if (/confirm you.?re not a bot|Sign in to confirm|Failed to extract any player response/i.test(msg)) {
+    return "유튜브가 이 서버의 접속을 막았어요. 자막 기능은 PC에서 start.bat으로 실행해서 사용해 주세요.";
   }
   if (/Private video|members-only|Join this channel/i.test(msg)) return "비공개/멤버십 영상이라 가져올 수 없어요.";
   if (/This live event will begin|Premieres in/i.test(msg)) return "아직 시작하지 않은 방송이에요.";
