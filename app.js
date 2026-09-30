@@ -183,9 +183,16 @@ function initSubsBlock(block) {
     progressEl.hidden = true;
   }
 
+  let shownCount = -1;
+
   function renderResult(job) {
     const segments = job.segments || [];
     const fileBase = (job.title || "subtitles").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80);
+    // 다시 그려도 스크롤 위치 유지 (맨 아래를 보고 있었다면 계속 맨 아래로)
+    const prevLines = resultEl.querySelector(".subs-lines");
+    const prevTop = prevLines ? prevLines.scrollTop : 0;
+    const atBottom = !prevLines || prevLines.scrollTop + prevLines.clientHeight >= prevLines.scrollHeight - 8;
+    shownCount = segments.length;
     resultEl.innerHTML = "";
 
     const head = document.createElement("div");
@@ -222,7 +229,7 @@ function initSubsBlock(block) {
     const lines = document.createElement("div");
     lines.className = "subs-lines";
     if (!segments.length) {
-      lines.textContent = "인식된 말소리가 없어요.";
+      lines.textContent = job.status === "running" ? "인식 중이에요…" : "인식된 말소리가 없어요.";
     }
     for (const seg of segments) {
       const row = document.createElement("div");
@@ -238,6 +245,7 @@ function initSubsBlock(block) {
 
     resultEl.append(head, lines);
     resultEl.hidden = false;
+    lines.scrollTop = job.status === "running" && atBottom ? lines.scrollHeight : prevTop;
   }
 
   async function poll(id) {
@@ -253,12 +261,15 @@ function initSubsBlock(block) {
       barEl.style.width = `${Math.round((job.progress || 0) * 100)}%`;
       if (job.status === "running") {
         setStatus([job.title, job.stage, job.note].filter(Boolean).join(" · "));
+        // PC 음성 인식은 느려서, 인식되는 문장을 그때그때 보여준다
+        if (job.segments && job.segments.length !== shownCount) renderResult(job);
         setTimeout(() => poll(id), 2000);
         return;
       }
       finish();
       if (job.status === "error") {
         setStatus(job.error, true);
+        if (job.segments && job.segments.length) renderResult(job);
         return;
       }
       setStatus(job.note || "");
@@ -278,6 +289,7 @@ function initSubsBlock(block) {
     btn.disabled = true;
     btn.textContent = "진행 중…";
     resultEl.hidden = true;
+    shownCount = -1;
     barEl.style.width = "0";
     progressEl.hidden = false;
     setStatus("요청을 보내는 중…");

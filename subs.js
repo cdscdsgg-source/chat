@@ -1,8 +1,9 @@
 // 유튜브 자막 추출/생성.
 // - 라이브 진행 중: 방송 시작부터 "요청한 시점"까지의 오디오 조각만 받아 음성 인식
 // - 종료된 영상: 유튜브 자막(수동 한국어 > 원어 자동자막)이 있으면 그대로, 없으면 음성 인식
-// 음성 인식은 Groq Whisper API(GROQ_API_KEY)를 쓰고, 오디오는 자막을 만든 뒤 바로 지운다.
-const { execFile } = require("child_process");
+// 음성 인식은 Groq Whisper API(GROQ_API_KEY)를 쓰고, 키가 없으면 이 PC의 faster-whisper(whisper_local.py)로
+// 대신한다. 오디오는 자막을 만든 뒤 바로 지운다.
+const { execFile, spawn } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
@@ -17,6 +18,10 @@ const YTDLP_URL =
 const YTDLP_MAX_AGE_MS = 24 * 3600 * 1000; // 유튜브가 자주 바뀌어서 하루마다 최신판으로 교체
 
 const GROQ_MODEL = process.env.GROQ_MODEL || "whisper-large-v3";
+const LOCAL_WHISPER_MODEL = process.env.LOCAL_WHISPER_MODEL || "small";
+const WHISPER_PYTHON = process.env.WHISPER_PYTHON
+  ? [process.env.WHISPER_PYTHON]
+  : process.platform === "win32" ? ["py", "-3.11"] : ["python3"];
 const CHUNK_SECONDS = 600;
 const LIVE_MAX_SECONDS = Number(process.env.LIVE_MAX_SECONDS || 6 * 3600);
 const JOB_TTL_MS = 3 * 3600 * 1000;
@@ -247,6 +252,64 @@ async function transcribeAll(chunks, job) {
   return results.flat();
 }
 
+// ---------- 음성 인식 (로컬 faster-whisper) ----------
+
+function transcribeLocal(chunks, job) {
+  return new Promise((resolve, reject) => {
+    const [bin, ...pre] = WHISPER_PYTHON;
+    const proc = spawn(bin, [...pre, path.join(__dirname, "whisper_local.py"), LOCAL_WHISPER_MODEL, ...chunks.map((c) => c.file)], {
+      windowsHide: true,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+    });
+    job.segments = []; // 인식되는 대로 화면에 보여주기 위해 바로 채운다
+    job.stage = `PC에서 음성 인식 중 (0/${chunks.length}) · 처음엔 모델을 내려받아요`;
+    let buf = "";
+    let stderr = "";
+    proc.stdout.setEncoding("utf-8");
+    proc.stdout.on("data", (data) => {
+      buf += data;
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let msg;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (msg.chunk_done != null) {
+          const done = msg.chunk_done + 1;
+          job.stage = `PC에서 음성 인식 중 (${done}/${chunks.length})`;
+          job.progress = 0.5 + 0.5 * (done / chunks.length);
+        } else if (!HALLUCINATIONS.test(msg.text)) {
+          const offset = chunks[msg.chunk].start;
+          job.segments.push({ start: offset + msg.start, end: offset + msg.end, text: msg.text });
+          job.stage = `PC에서 음성 인식 중 (${msg.chunk}/${chunks.length}) · ${fmtClock(offset + msg.end)}까지`;
+        }
+      }
+    });
+    proc.stderr.on("data", (d) => (stderr = (stderr + d).slice(-4000)));
+    proc.on("error", () =>
+      reject(new Error("GROQ_API_KEY가 없고, 이 컴퓨터에서 음성 인식(Python 3.11 + faster-whisper)도 실행할 수 없어요."))
+    );
+    proc.on("close", (code) => {
+      if (code === 0) return resolve(job.segments);
+      const hint = /No module named 'faster_whisper'/.test(stderr)
+        ? "faster-whisper가 설치돼 있지 않아요 (py -3.11 -m pip install faster-whisper)."
+        : stderr.trim().split("\n").pop() || `종료 코드 ${code}`;
+      reject(new Error(`PC 음성 인식 실패: ${hint}`));
+    });
+  });
+}
+
+function fmtClock(sec) {
+  const t = Math.floor(sec);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(t / 3600))}:${pad(Math.floor((t % 3600) / 60))}:${pad(t % 60)}`;
+}
+
 // ---------- 작업 ----------
 
 function isYoutubeUrl(u) {
@@ -290,8 +353,8 @@ async function runJob(job) {
       }
     }
 
-    if (!process.env.GROQ_API_KEY) throw new Error("유튜브 자막이 없고, 서버에 GROQ_API_KEY가 없어 자막을 만들 수 없어요.");
-    job.source = "음성 인식 (Whisper)";
+    const useGroq = Boolean(process.env.GROQ_API_KEY);
+    job.source = useGroq ? "음성 인식 (Groq Whisper)" : "음성 인식 (PC Whisper)";
 
     let audioFile;
     if (job.live) {
@@ -307,7 +370,7 @@ async function runJob(job) {
     const chunks = await splitAudio(audioFile, workDir);
     fs.rmSync(audioFile, { force: true });
     if (job.offset) for (const c of chunks) c.start += job.offset;
-    job.segments = await transcribeAll(chunks, job);
+    job.segments = useGroq ? await transcribeAll(chunks, job) : await transcribeLocal(chunks, job);
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
