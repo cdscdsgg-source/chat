@@ -166,14 +166,17 @@ def read_seen(entry_id):
     if not f.exists():
         return None
     try:
-        return set(json.loads(f.read_text()).get("seen", []))
+        return list(json.loads(f.read_text()).get("seen", []))
     except Exception:
         return None
 
 
 def write_seen(entry_id, seen_hrefs):
+    # Callers pass newest-first, so truncate the tail (oldest) — never the
+    # head, or the posts currently on page 1 would fall out of the state
+    # and be re-notified on every run once the list passes the cap.
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    capped = list(seen_hrefs)[-MAX_SEEN_PER_BOARD:]
+    capped = list(seen_hrefs)[:MAX_SEEN_PER_BOARD]
     state_file_for(entry_id).write_text(json.dumps({"seen": capped}, ensure_ascii=False, indent=2))
 
 
@@ -215,18 +218,19 @@ def process_board(entry):
         print(f"[{entry_id}] no list pattern detected, skipping this run", file=sys.stderr)
         return
 
-    seen = read_seen(entry_id)
+    seen_list = read_seen(entry_id)
     current_hrefs = [href for href, _ in items]
 
-    if seen is None:
+    if seen_list is None:
         # First run for this board: establish a baseline without notifying about the backlog.
         write_seen(entry_id, current_hrefs)
         print(f"[{entry_id}] baseline set with {len(current_hrefs)} items")
         return
 
-    new_items = [(href, text) for href, text in items if href not in seen]
+    seen_set = set(seen_list)
+    new_items = [(href, text) for href, text in items if href not in seen_set]
     if not new_items:
-        write_seen(entry_id, list(dict.fromkeys(current_hrefs + list(seen))))
+        write_seen(entry_id, list(dict.fromkeys(current_hrefs + seen_list)))
         return
 
     notified_hrefs = []
@@ -240,8 +244,12 @@ def process_board(entry):
         notified_hrefs.append(href)
 
     if notified_hrefs:
-        updated_seen = list(dict.fromkeys(current_hrefs + notified_hrefs + list(seen)))
-        write_seen(entry_id, updated_seen)
+        # Only mark as seen what we actually notified about (plus what was
+        # already seen). New posts whose notification failed or was never
+        # attempted stay "new" so the next run retries them.
+        pending = {href for href, _ in new_items} - set(notified_hrefs)
+        recorded_current = [h for h in current_hrefs if h not in pending]
+        write_seen(entry_id, list(dict.fromkeys(recorded_current + seen_list)))
 
 
 def main():
