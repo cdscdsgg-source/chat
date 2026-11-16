@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>유튜브 자막</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="eyebrow"><span class="tally"></span>YouTube Subtitles</div>
+      <div class="title-row">
+        <h1>유튜브 자막</h1>
+      </div>
+      <p class="subtitle">유튜브 자막이 있으면 그대로 가져오고, 없으면 이 PC에서 음성 인식으로 새로 만들어요. 영상은 저장하지 않아요. 프로그램을 끄려면 작업 표시줄 오른쪽 트레이 아이콘 → 종료를 누르세요.</p>
+    </header>
+
+    <section id="panel-subs" class="panel">
+      <div class="subs-block" data-mode="live">
+        <div class="bw-topic-label">라이브 방송 · 지금까지 진행된 부분</div>
+        <section class="input-row input-row-lg">
+          <input class="board-watch-input subs-input" type="url" inputmode="url" placeholder="https://youtube.com/... 라이브 주소를 붙여넣으세요" autocomplete="off" />
+          <button class="board-watch-btn subs-btn" type="button">자막 추출</button>
+        </section>
+        <p class="status subs-status" aria-live="polite"></p>
+        <div class="subs-progress" hidden><div class="subs-progress-bar"></div></div>
+        <div class="subs-result" hidden></div>
+      </div>
+
+      <div class="subs-block" data-mode="vod">
+        <div class="bw-topic-label">종료된 영상 · 자막이 없으면 새로 생성</div>
+        <section class="input-row input-row-lg">
+          <input class="board-watch-input subs-input" type="url" inputmode="url" placeholder="https://youtube.com/... 영상 주소를 붙여넣으세요" autocomplete="off" />
+          <button class="board-watch-btn subs-btn" type="button">자막 만들기</button>
+        </section>
+        <p class="status subs-status" aria-live="polite"></p>
+        <div class="subs-progress" hidden><div class="subs-progress-bar"></div></div>
+        <div class="subs-result" hidden></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="subs-ui.js"></script>
+</body>
+</html>

@@ -8,10 +8,12 @@ const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const ffmpegPath = require("ffmpeg-static");
+// 포터블 PC 프로그램(desktop/)은 아래 경로들을 환경변수로 자기 폴더 안의 것으로 지정한다
+const ffmpegPath = process.env.FFMPEG_PATH || require("ffmpeg-static");
 
-const BIN_DIR = path.join(os.tmpdir(), "ytsubs-bin");
-const YTDLP_PATH = path.join(BIN_DIR, process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp");
+const YTDLP_PATH =
+  process.env.YTDLP_PATH ||
+  path.join(os.tmpdir(), "ytsubs-bin", process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp");
 const YTDLP_URL =
   "https://github.com/yt-dlp/yt-dlp/releases/latest/download/" +
   (process.platform === "win32" ? "yt-dlp.exe" : process.platform === "darwin" ? "yt-dlp_macos" : "yt-dlp_linux");
@@ -27,10 +29,11 @@ const LIVE_MAX_SECONDS = Number(process.env.LIVE_MAX_SECONDS || 6 * 3600);
 const JOB_TTL_MS = 3 * 3600 * 1000;
 
 const jobs = new Map();
+const children = new Set(); // 프로그램 종료 시 함께 끝낼 음성 인식 프로세스
 
 // 라이브는 같은 방송을 여러 번 요청하므로, 인식한 자막과 처리한 위치를 영상별로 저장해 두고
 // 다음 요청 때는 그 뒤에 새로 방송된 부분만 인식한다.
-const CACHE_DIR = path.join(__dirname, "subs-cache");
+const CACHE_DIR = process.env.SUBS_CACHE_DIR || path.join(__dirname, "subs-cache");
 
 function loadLiveCache(videoId) {
   try {
@@ -57,13 +60,18 @@ function ensureYtdlp() {
         const st = fs.statSync(YTDLP_PATH);
         if (Date.now() - st.mtimeMs < YTDLP_MAX_AGE_MS) return;
       } catch {}
-      fs.mkdirSync(BIN_DIR, { recursive: true });
-      const res = await fetch(YTDLP_URL);
-      if (!res.ok) throw new Error(`yt-dlp 다운로드 실패 (HTTP ${res.status})`);
-      const tmp = `${YTDLP_PATH}.download`;
-      fs.writeFileSync(tmp, Buffer.from(await res.arrayBuffer()));
-      fs.chmodSync(tmp, 0o755);
-      fs.renameSync(tmp, YTDLP_PATH);
+      try {
+        fs.mkdirSync(path.dirname(YTDLP_PATH), { recursive: true });
+        const res = await fetch(YTDLP_URL);
+        if (!res.ok) throw new Error(`yt-dlp 다운로드 실패 (HTTP ${res.status})`);
+        const tmp = `${YTDLP_PATH}.download`;
+        fs.writeFileSync(tmp, Buffer.from(await res.arrayBuffer()));
+        fs.chmodSync(tmp, 0o755);
+        fs.renameSync(tmp, YTDLP_PATH);
+      } catch (err) {
+        // 인터넷이나 GitHub 접속이 막혀 있으면 이미 있는 판으로 계속한다
+        if (!fs.existsSync(YTDLP_PATH)) throw err;
+      }
     })().finally(() => {
       // 실패했거나 하루가 지나면 다음 요청 때 다시 확인
       setTimeout(() => (ytdlpReady = null), 60 * 1000);
@@ -292,6 +300,8 @@ function transcribeLocal(chunks, job, onChunkDone) {
       windowsHide: true,
       env: { ...process.env, PYTHONIOENCODING: "utf-8" },
     });
+    children.add(proc);
+    proc.on("exit", () => children.delete(proc));
     job.segments = job.segments || []; // 인식되는 대로 화면에 보여주기 위해 바로 채운다
     job.stage = `PC에서 음성 인식 중 (0/${chunks.length}) · 처음엔 모델을 내려받아요`;
     let buf = "";
@@ -481,4 +491,8 @@ function getJob(id) {
   return pub;
 }
 
-module.exports = { startJob, getJob };
+function shutdown() {
+  for (const proc of children) proc.kill();
+}
+
+module.exports = { startJob, getJob, shutdown };
