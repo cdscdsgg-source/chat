@@ -303,6 +303,21 @@ function updateLiveStatus() {
   setStatus($("live-status"), waiting > 1 ? `${head} · 인식 대기 ${waiting}개 (PC가 따라잡는 중)` : `${head}…`);
 }
 
+// 탭 소리 캡처용 ID. 패널에서 먼저 시도하고, 안 되면 백그라운드에 부탁한다.
+async function getStreamId(tabId) {
+  try {
+    return await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  } catch (panelErr) {
+    const res = await chrome.runtime.sendMessage({ type: "getStreamId", tabId });
+    if (res && res.id) return res.id;
+    const detail = (res && res.error) || panelErr.message || String(panelErr);
+    const err = new Error(
+      `이 탭의 소리를 가져올 권한이 없어요. 영상이 나오는 이 탭에서 툴바의 확장 아이콘을 눌러 패널을 연 뒤 다시 시작해 주세요. (${detail})`
+    );
+    throw err;
+  }
+}
+
 async function startLive() {
   const btn = $("live-btn");
   btn.disabled = true;
@@ -311,12 +326,7 @@ async function startLive() {
     await refreshTab();
     if (!currentTab) throw new Error("탭을 찾지 못했어요.");
 
-    let streamId;
-    try {
-      streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: currentTab.id });
-    } catch (err) {
-      throw new Error("이 탭의 소리를 가져올 권한이 없어요. 이 탭에서 툴바의 확장 아이콘을 한 번 누른 뒤 다시 시작해 주세요.");
-    }
+    const streamId = await getStreamId(currentTab.id);
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } },
       video: false,
