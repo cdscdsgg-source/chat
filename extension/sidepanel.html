@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>영상 자막 추출기</title>
+<link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="head">
+    <div class="app-title">영상 자막 추출기</div>
+    <div class="conn" id="conn"><span class="dot"></span><span id="conn-text">PC 프로그램 확인 중…</span></div>
+  </header>
+
+  <div class="tab-info">
+    <div class="tab-label">지금 탭</div>
+    <div class="tab-title" id="tab-title">-</div>
+  </div>
+
+  <nav class="modes" role="tablist">
+    <button class="mode active" data-pane="live" role="tab" aria-selected="true">실시간 받아쓰기</button>
+    <button class="mode" data-pane="full" role="tab" aria-selected="false">처음부터 지금까지</button>
+  </nav>
+
+  <section class="pane" id="pane-live">
+    <p class="hint">지금 탭에서 나오는 소리를 받아 자막으로 만들어요. 어떤 사이트든 소리가 나는 영상이면 돼요. 이 패널을 닫으면 멈춰요.</p>
+    <button class="primary" id="live-btn" type="button">받아쓰기 시작</button>
+    <p class="status" id="live-status" aria-live="polite"></p>
+    <div class="result">
+      <div class="result-head">
+        <span class="count" id="live-count">0줄</span>
+        <span class="actions">
+          <button type="button" data-act="copy">복사</button>
+          <button type="button" data-act="txt">TXT</button>
+          <button type="button" data-act="srt">SRT</button>
+          <button type="button" data-act="clear">지우기</button>
+        </span>
+      </div>
+      <div class="lines" id="live-lines"><div class="empty">아직 받아쓴 내용이 없어요.</div></div>
+    </div>
+  </section>
+
+  <section class="pane" id="pane-full" hidden>
+    <p class="hint">유튜브 라이브는 방송 시작부터 지금까지, 종료된 영상은 전체 자막을 가져와요. 유튜브 자막이 없으면 PC에서 새로 만들어요. 같은 라이브를 다시 누르면 새로 방송된 부분만 이어서 해요.</p>
+    <button class="primary" id="full-btn" type="button">자막 가져오기</button>
+    <p class="status" id="full-status" aria-live="polite"></p>
+    <div class="progress" id="full-progress" hidden><div class="bar" id="full-bar"></div></div>
+    <div class="result">
+      <div class="result-head">
+        <span class="count" id="full-count">0줄</span>
+        <span class="actions">
+          <button type="button" data-act="copy">복사</button>
+          <button type="button" data-act="txt">TXT</button>
+          <button type="button" data-act="srt">SRT</button>
+        </span>
+      </div>
+      <div class="lines" id="full-lines"><div class="empty">유튜브 탭에서 버튼을 눌러주세요.</div></div>
+    </div>
+  </section>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

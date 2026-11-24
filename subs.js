@@ -240,12 +240,14 @@ async function splitAudio(input, workDir) {
 
 // ---------- 음성 인식 (Groq) ----------
 
-const HALLUCINATIONS = /^(시청해 ?주셔서 감사합니다|구독과 좋아요|MBC 뉴스|자막 제공)/;
+// 조용하거나 음악만 나올 때 Whisper가 지어내는 대표적인 문장들
+const HALLUCINATIONS = /^(시청해 ?주셔서 감사합니다|구독과 좋아요|구독,? 좋아요|MBC 뉴스|자막 제공|다음 영상에서 만나요|한국어 자막)/;
 
 async function transcribeChunk(chunk) {
   for (let attempt = 0; ; attempt++) {
     const form = new FormData();
-    form.append("file", new Blob([fs.readFileSync(chunk.file)], { type: "audio/ogg" }), path.basename(chunk.file));
+    const type = chunk.file.endsWith(".wav") ? "audio/wav" : "audio/ogg";
+    form.append("file", new Blob([fs.readFileSync(chunk.file)], { type }), path.basename(chunk.file));
     form.append("model", GROQ_MODEL);
     form.append("response_format", "verbose_json");
     form.append("temperature", "0");
@@ -344,6 +346,92 @@ function transcribeLocal(chunks, job, onChunkDone) {
       reject(new Error(`PC 음성 인식 실패: ${hint}`));
     });
   });
+}
+
+// ---------- 실시간 조각 인식 (크롬 확장) ----------
+// 확장이 탭 소리를 10~20초씩 잘라 보내면 바로 인식한다. 매번 모델을 올리면 느리므로
+// whisper_local.py를 상주 모드로 하나 띄워 두고 재사용한다.
+
+let worker = null;
+let clipSeq = 0;
+
+function getWorker() {
+  if (worker) return worker;
+  const [bin, ...pre] = WHISPER_PYTHON;
+  const proc = spawn(bin, [...pre, path.join(__dirname, "whisper_local.py"), LOCAL_WHISPER_MODEL, "--serve"], {
+    windowsHide: true,
+    env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+  });
+  children.add(proc);
+  const w = { proc, pending: new Map(), stderr: "" };
+  let markReady;
+  let markFailed;
+  w.ready = new Promise((resolve, reject) => {
+    markReady = resolve;
+    markFailed = reject;
+  });
+  w.ready.catch(() => {});
+
+  let buf = "";
+  proc.stdout.setEncoding("utf-8");
+  proc.stdout.on("data", (data) => {
+    buf += data;
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (msg.ready) {
+        markReady();
+        continue;
+      }
+      const p = w.pending.get(msg.id);
+      if (!p) continue;
+      w.pending.delete(msg.id);
+      if (msg.error) p.reject(new Error(msg.error));
+      else p.resolve(msg.segments);
+    }
+  });
+  proc.stderr.on("data", (d) => (w.stderr = (w.stderr + d).slice(-4000)));
+  const fail = (err) => {
+    children.delete(proc);
+    if (worker === w) worker = null; // 다음 요청 때 새로 띄운다
+    markFailed(err);
+    for (const p of w.pending.values()) p.reject(err);
+    w.pending.clear();
+  };
+  proc.on("error", () => fail(new Error("이 컴퓨터에서 음성 인식(Python + faster-whisper)을 실행할 수 없어요.")));
+  proc.on("exit", (code) => fail(new Error(`음성 인식이 종료됐어요: ${w.stderr.trim().split("\n").pop() || code}`)));
+  worker = w;
+  return w;
+}
+
+// wav: 16kHz 모노 WAV 버퍼. 조각 시작 기준 시간의 문장 목록을 돌려준다.
+async function transcribeClip(wav) {
+  const id = ++clipSeq;
+  const file = path.join(os.tmpdir(), `ytsubs-clip-${process.pid}-${id}.wav`);
+  fs.writeFileSync(file, wav);
+  try {
+    let segments;
+    if (process.env.GROQ_API_KEY) {
+      segments = await transcribeChunk({ file, start: 0 });
+    } else {
+      const w = getWorker();
+      await w.ready;
+      segments = await new Promise((resolve, reject) => {
+        w.pending.set(id, { resolve, reject });
+        w.proc.stdin.write(JSON.stringify({ id, file }) + "\n");
+      });
+    }
+    return segments.filter((s) => s.text && !HALLUCINATIONS.test(s.text));
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
 }
 
 function fmtClock(sec) {
@@ -495,4 +583,4 @@ function shutdown() {
   for (const proc of children) proc.kill();
 }
 
-module.exports = { startJob, getJob, shutdown };
+module.exports = { startJob, getJob, transcribeClip, shutdown };

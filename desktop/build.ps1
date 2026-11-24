@@ -55,6 +55,9 @@ Copy-Item (Join-Path $Desktop "server.js"), (Join-Path $Desktop "index.html") $A
 Copy-Item (Join-Path $Repo "subs.js"), (Join-Path $Repo "subs-ui.js"), (Join-Path $Repo "style.css"), (Join-Path $Repo "whisper_local.py") $App
 Copy-Item (Join-Path $Desktop "README.txt") $Out
 
+Step "Chrome extension"
+Copy-Item (Join-Path $Repo "extension") (Join-Path $Out "chrome-extension") -Recurse
+
 Step "Node"
 Copy-Item (Get-Command node).Source (Join-Path $Runtime "node.exe")
 

@@ -41,11 +41,56 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+const MAX_CLIP_BYTES = 8 * 1024 * 1024; // 16kHz 모노 WAV 4분 분량
+
 const server = http.createServer((req, res) => {
   const pathname = req.url.split("?")[0];
 
+  // 이 프로그램 화면과 크롬 확장에서 온 요청만 받는다 (아무 웹사이트나 이 PC의 프로그램을 쓰지 못하게)
+  const origin = req.headers.origin;
+  if (origin) {
+    const own = origin === `http://127.0.0.1:${server.address().port}`;
+    const extension = origin.startsWith("chrome-extension://");
+    if (!own && !extension) {
+      res.writeHead(403);
+      return res.end("Forbidden");
+    }
+    if (extension) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST");
+    }
+  }
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    return res.end();
+  }
+
   if (req.method === "GET" && pathname === "/api/ping") {
-    return sendJson(res, 200, { ok: true, app: "yt-subtitle" });
+    return sendJson(res, 200, { ok: true, app: "yt-subtitle", engine: process.env.GROQ_API_KEY ? "groq" : "local" });
+  }
+
+  // 크롬 확장의 실시간 받아쓰기: 탭 소리 조각(WAV)을 받아 바로 인식한다
+  if (req.method === "POST" && pathname === "/api/clip") {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > MAX_CLIP_BYTES) {
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", async () => {
+      try {
+        const segments = await subs.transcribeClip(Buffer.concat(chunks));
+        sendJson(res, 200, { ok: true, segments });
+      } catch (err) {
+        sendJson(res, 500, { ok: false, error: err.message || "음성 인식에 실패했어요." });
+      }
+    });
+    return;
   }
 
   if (req.method === "POST" && pathname === "/api/subs/start") {

@@ -4,6 +4,11 @@
 stdout으로 한 줄에 JSON 하나씩 내보낸다:
   {"chunk": i, "start": s, "end": e, "text": "..."}  인식된 문장 (청크 기준 시간)
   {"chunk_done": i}                                  청크 하나 끝남
+
+상주 모드: python whisper_local.py <model> --serve
+크롬 확장의 실시간 받아쓰기용. 모델을 한 번만 올려두고, stdin으로 받은 짧은 오디오 파일을 바로 인식한다.
+  입력 한 줄: {"id": n, "file": "..."}
+  출력 한 줄: {"id": n, "segments": [{"start": s, "end": e, "text": "..."}]}  또는 {"id": n, "error": "..."}
 """
 import json
 import os
@@ -31,9 +36,31 @@ def split_sentences(start, end, text):
         t += dur
 
 
+def serve(model):
+    emit({"ready": True})
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        req = json.loads(line)
+        try:
+            # 10~20초 조각이라 배치 처리 이점이 없고, 문장 단위 시간이 더 정확한 일반 방식을 쓴다
+            segments, _ = model.transcribe(req["file"], beam_size=1, vad_filter=True)
+            out = [
+                {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
+                for s in segments
+                if s.text.strip()
+            ]
+            emit({"id": req["id"], "segments": out})
+        except Exception as e:  # noqa: BLE001
+            emit({"id": req["id"], "error": str(e)})
+
+
 def main():
     model_name, files = sys.argv[1], sys.argv[2:]
     model = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=os.cpu_count() or 4)
+    if files == ["--serve"]:
+        return serve(model)
     # 배치 처리 + 빔 1: 기본 설정(빔 5) 대비 약 2.8배 빠르고 품질 차이는 거의 없다 (Ryzen 5 4500U 기준 small 4.4배속)
     pipeline = BatchedInferencePipeline(model)
     for i, f in enumerate(files):

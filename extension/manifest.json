@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "영상 자막 추출기",
+  "version": "1.0.0",
+  "description": "지금 탭에서 재생 중인 영상의 소리를 PC 프로그램(YouTubeSubtitle)으로 인식해 자막을 만들어요. 유튜브는 방송 처음부터 가져올 수도 있어요.",
+  "permissions": ["sidePanel", "tabCapture", "activeTab", "tabs", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": {
+    "default_title": "영상 자막 추출기",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png" }
+  },
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
+}
