@@ -308,7 +308,15 @@ async function getStreamId(tabId) {
   try {
     return await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
   } catch (panelErr) {
-    const res = await chrome.runtime.sendMessage({ type: "getStreamId", tabId });
+    let res;
+    try {
+      res = await chrome.runtime.sendMessage({ type: "getStreamId", tabId });
+    } catch {
+      // 백그라운드가 옛날 버전이면 이 메시지를 받을 곳이 없다 (패널 파일만 새로 읽힌 상태)
+      throw new Error(
+        "확장 프로그램이 업데이트됐어요. chrome://extensions 에서 '영상 자막 추출기'의 새로고침(↻)을 누르고, 영상 탭에서 아이콘을 다시 눌러 주세요."
+      );
+    }
     if (res && res.id) return res.id;
     const detail = (res && res.error) || panelErr.message || String(panelErr);
     const err = new Error(
